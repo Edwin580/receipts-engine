@@ -5,9 +5,11 @@ data and see the source rows that produced it, every transform in between,
 and what the number becomes if you exclude any of those rows. The engine is
 custom Rust compiled to WASM and runs entirely in the browser.
 
-**Status:** M0 (snapshot pipeline) implemented, awaiting review. Verified
-against the live Socrata API on 2026-09-24: 7,111,809 rows, snapshot
-`3b42e46a…` (see `docs/benchmarks/m0.md`).
+**Status:** M0 (snapshot pipeline) implemented and verified against the
+live Socrata API on 2026-09-24: 7,111,809 rows, snapshot `3b42e46a…` (see
+`docs/benchmarks/m0.md`). M1 (logical plans and native execution)
+implemented, awaiting review (see `docs/engine/plan.md`,
+`docs/benchmarks/m1.md`).
 
 ## Snapshot CLI
 
@@ -26,6 +28,16 @@ python3 tools/oracle/snapshot_oracle.py raw/synth snapshots/synth/<hash16>   # n
 Docs: `docs/snapshot/schema.md` (format and hashing),
 `docs/snapshot/cleaning-rules.md`, `docs/benchmarks/m0.md`.
 
+## Engine (M1)
+
+Plans are built in Rust or loaded from JSON (`docs/engine/plan.md`),
+validated against a snapshot's schema, hashed, described in plain English,
+and executed natively:
+
+```
+cargo run --release -p receipts-bench --bin m1 -- snapshots/nyc311/<hash16>
+```
+
 ## Layout
 
 ```
@@ -38,11 +50,13 @@ crates/
   receipts-circuit/   how-provenance circuits (expert mode)        (M7)
   receipts-wasm/      wasm-bindgen API surface                     (M4)
   receipts-snapshot/  offline snapshot CLI                         (M0)
-  receipts-bench/     criterion benches                            (M1)
+  receipts-bench/     benchmarks on real snapshots                 (M1)
 web/                  React + TS frontend                          (M5, not created yet)
 docs/
   adr/                architecture decision records
   snapshot/           snapshot schema, manifest example, cleaning rules
+  engine/             plan semantics, JSON form, hashing (M1)
+  benchmarks/         measured numbers per milestone
 ```
 
 ## Dependencies
@@ -52,7 +66,7 @@ Every dependency is proposed before it's added. Approved for M0:
 | Crate | Used by | Why |
 |---|---|---|
 | `blake3` | core, snapshot | Content hashing (required by the spec). |
-| `serde_json` | core, snapshot | Canonical JSON (core); Socrata JSON and the manifest (snapshot). |
+| `serde_json` | core, plan, snapshot | Canonical JSON (core); plan JSON (plan); Socrata JSON and the manifest (snapshot). The `float_roundtrip` feature is on (M1, ADR 0008) so decimals parse exactly. |
 | `arrow-array`, `arrow-buffer`, `arrow-schema`, `arrow-ipc` | snapshot | Writing and verifying Arrow IPC natively. The WASM reader is decided in M4 (ADR 0001). |
 | `ureq` (rustls) | snapshot | Small, synchronous HTTPS client for Socrata paging. |
 | `serde` | snapshot | Manifest and `fetch.json` structs. |
