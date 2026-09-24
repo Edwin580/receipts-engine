@@ -1,7 +1,7 @@
 {
   "format_version": "receipts-snapshot/1",
   "snapshot_hash": "33440db6b778821dce32a2ed71243168b70eb03c12dbcb9a2282596760766224",
-  "manifest_hash": "5e69d372bc3957c7a8c3987564cb3a25c31ffa85a32fcb09f6782e375cf983ff",
+  "manifest_hash": "8af682ba26bf4d151885bef4bf57c62d6a3a47fda28fce4c660ea48491c26673",
   "source": {
     "source_id": 1,
     "dataset": "NYC 311 Service Requests",
@@ -45,10 +45,10 @@
     "metadata_hash": "705f06e9fc02e9eb0491db309c463c2b91009b5653d504d83c4df224f646594d",
     "rows_updated_at_start": null,
     "rows_updated_at_end": null,
-    "tool_version": "receipts-snapshot 0.0.0 (git 66331284b622-dirty)"
+    "tool_version": "receipts-snapshot 0.0.0 (git 61ca22bc5d51)"
   },
   "build": {
-    "tool_version": "receipts-snapshot 0.0.0 (git 66331284b622-dirty)"
+    "tool_version": "receipts-snapshot 0.0.0 (git 61ca22bc5d51)"
   },
   "scope": {
     "sentence": "311 service requests created from 2024-01-01 up to (not including) 2026-01-01, NYC local time.",
