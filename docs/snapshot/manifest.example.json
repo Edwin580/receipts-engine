@@ -1,0 +1,78 @@
+{
+  "_note": "Illustrative only: the values are made up and the schema list is shortened to 3 of 13 columns.",
+  "format_version": "receipts-snapshot/1",
+  "snapshot_hash": "3f1c…(64 hex)",
+  "manifest_hash": "9a02…(64 hex)",
+  "source": {
+    "source_id": 1,
+    "dataset": "NYC 311 Service Requests",
+    "portal": "data.cityofnewyork.us",
+    "dataset_id": "erm2-nwe9",
+    "source_url": "https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2010-to-Present/erm2-nwe9",
+    "terms_url": "https://opendata.cityofnewyork.us/overview/#termsofuse",
+    "rows_updated_at": "2026-09-23T06:12:44Z"
+  },
+  "fetch": {
+    "started_at": "2026-09-24T22:00:00Z",
+    "finished_at": "2026-09-24T22:41:13Z",
+    "endpoint": "https://data.cityofnewyork.us/resource/erm2-nwe9.json",
+    "select": ["unique_key", "created_date", "closed_date", "agency", "complaint_type", "descriptor", "location_type", "incident_zip", "borough", "community_board", "status", "open_data_channel_type", "latitude", "longitude"],
+    "where": "created_date >= '2024-01-01T00:00:00' AND created_date < '2026-01-01T00:00:00'",
+    "order": "unique_key",
+    "pagination": { "kind": "keyset", "key": "unique_key", "page_size": 50000 },
+    "pages": 134,
+    "raw_records": 6671234,
+    "raw_hash": "c7d4…(64 hex)",
+    "tool_version": "receipts-snapshot 0.1.0 (git 1a2b3c4)"
+  },
+  "scope": {
+    "sentence": "311 service requests created in calendar years 2024 and 2025 (NYC local time).",
+    "predicate": { "column": "created_date", "gte": "2024-01-01T00:00:00", "lt": "2026-01-01T00:00:00" }
+  },
+  "row_count": 6671101,
+  "chunk_rows": 65536,
+  "chunk_count": 102,
+  "sort_key": ["created_date", "unique_key"],
+  "schema": [
+    {
+      "index": 0, "name": "unique_key", "type": "i64", "nullable": false,
+      "source_fields": ["unique_key"],
+      "description": "The city's ID for this service request.",
+      "null_count": 0,
+      "column_hash": "…", "chunk_hashes": ["…"]
+    },
+    {
+      "index": 8, "name": "borough", "type": "utf8_dict", "nullable": true,
+      "source_fields": ["borough"],
+      "description": "Borough the request was about. 'Unspecified' is the city's own label for requests without one.",
+      "null_count": 0, "dictionary_size": 6,
+      "dictionary_hash": "…", "column_hash": "…", "chunk_hashes": ["…"]
+    },
+    {
+      "index": 12, "name": "location", "type": "geo", "nullable": true,
+      "source_fields": ["latitude", "longitude"],
+      "description": "Where the problem was reported, as latitude/longitude (stored to about 0.3 m).",
+      "null_count": 104233,
+      "column_hash": "…", "chunk_hashes": ["…"]
+    }
+  ],
+  "excluded_columns": [
+    { "field": "resolution_description", "reason": "Free text; large and high-cardinality." },
+    { "field": "agency_name", "reason": "Redundant with agency." }
+  ],
+  "cleaning": {
+    "rules_version": 1,
+    "rules": [
+      { "id": "CR-04", "action": "reject", "affected_rows": 0 },
+      { "id": "CR-07", "action": "normalize", "affected_rows": 1893 },
+      { "id": "CR-09", "action": "null", "affected_rows": 104233 }
+    ],
+    "rejected_rows": 133,
+    "cleaning_log_hash": "…",
+    "rejects_hash": "…"
+  },
+  "known_issues": [
+    { "id": "KI-closed-before-created", "count": 4120, "sentence": "4,120 requests have a closed date earlier than their created date." },
+    { "id": "KI-midnight-created", "count": 212004, "sentence": "212,004 requests were created at exactly midnight, which usually means only the date was recorded." }
+  ]
+}
