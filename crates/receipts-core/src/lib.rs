@@ -1,8 +1,16 @@
-//! Core types shared by every engine crate: row identity, column types, and
-//! (from M1) the column store and content hashing.
+//! Core types shared by every engine crate: row identity, column types, the
+//! snapshot column representation, timestamps, and content hashing.
 
+mod bitmap;
+pub mod canonical_json;
+mod column;
+pub mod hash;
 mod row_id;
+pub mod time;
 mod types;
 
+pub use bitmap::Bitmap;
+pub use column::{Column, ColumnData};
+pub use hash::ContentHash;
 pub use row_id::{RowId, SourceId};
 pub use types::ColumnType;

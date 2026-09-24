@@ -1,6 +1,6 @@
 # 0002. Content hashing over a canonical logical encoding, not IPC bytes
 
-- Status: Proposed
+- Status: Accepted (M0 review, 2026-09-24)
 - Date: 2026-09-24
 - Milestone: M0
 
@@ -11,7 +11,9 @@ and the contents of null slots, which Arrow leaves undefined.
 
 ## Decision
 Hash a byte encoding we define ourselves (docs/snapshot/schema.md §6):
-- domain-separated BLAKE3,
+- BLAKE3 in `derive_key` mode, with one context string per kind of hashed
+  object (chunk, dictionary, column, snapshot, ...). This is BLAKE3's built-in
+  domain separation, and it replaces the ad-hoc prefix tags in the first draft,
 - little-endian values,
 - validity bitmap stored explicitly,
 - null slots zeroed.
@@ -27,5 +29,5 @@ does not cover fetch timestamps or tool version; `manifest_hash` covers those.
   loading.
 - The hasher reads logical values, not file bytes. It costs one extra pass,
   but BLAKE3 runs at several GB/s, so this is negligible.
-- The encoding is versioned (`/v1` in each domain tag). Changing it means a
-  new format version.
+- The encoding is versioned (`v1` in each context string). Changing it means
+  a new format version. A known-answer test pins the chunk encoding.

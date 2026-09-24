@@ -1,6 +1,6 @@
 # 0001. Snapshot storage: Arrow IPC file, fixed 64Ki-row chunks, no Parquet
 
-- Status: Proposed
+- Status: Accepted (M0 review, 2026-09-24)
 - Date: 2026-09-24
 - Milestone: M0
 

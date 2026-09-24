@@ -1,13 +1,13 @@
-# Snapshot schema (M0 proposal)
+# Snapshot schema
 
-Status: **proposed, awaiting review.** Nothing here is implemented yet except
-`RowId` and `ColumnType` in `receipts-core`.
+Status: **implemented (M0)** in `crates/receipts-snapshot`. The hashing
+primitives live in `crates/receipts-core`.
 
 A snapshot is an immutable, content-addressed copy of one public dataset. It
 is produced offline by `receipts-snapshot` and served as static files.
 Everything the engine computes is keyed by the snapshot's `snapshot_hash`.
 
-## 1. Guiding rule: snapshots coerce, plans judge
+## 1. Guiding rule: snapshots coerce, plans judge (ADR 0004)
 
 The snapshot step only changes the **representation** of the data (text →
 typed values, strings → dictionary codes). It makes no **judgements about the
@@ -16,196 +16,212 @@ in the logical plan as explicit `Filter`/`Map` steps. There they show up in the
 Pipeline View with a sentence and a row count, and they can be undone as a
 counterfactual.
 
-If a value can't be represented at all (for example, an unparseable
-timestamp), the snapshot records a null or rejects the row, and **logs it**.
-Nothing is dropped or changed silently. The full rule list is in
-[`cleaning-rules.md`](cleaning-rules.md).
+If a value can't be represented at all, the snapshot records a null or
+rejects the row, and **logs it**. Nothing is dropped or changed silently. The
+full rule list is in [`cleaning-rules.md`](cleaning-rules.md).
 
-## 2. Files
+## 2. Pipeline and files (ADR 0006)
 
 ```
-snapshots/<dataset>/<snapshot_hash[0..16]>/
-  manifest.json        # everything in §4; small, fetched first
-  data.arrow           # Arrow IPC *file* format; one record batch per chunk
-  cleaning_log.arrow   # one row per value a cleaning rule touched (§5)
-  rejects.arrow        # one row per source record that was rejected (§5)
+receipts-snapshot fetch  --out raw/nyc311 [--from 2024-01-01 --to 2026-01-01]
+receipts-snapshot build  --raw raw/nyc311 --out snapshots/nyc311
+receipts-snapshot verify snapshots/nyc311/<hash16>
+```
+
+`fetch` writes a **raw directory**: the API's responses, byte for byte.
+`build` turns it into a **snapshot directory**. Cleaning can therefore be
+re-run and tested offline, and the raw pages are pinned by hash.
+
+```
+raw/<name>/                          (local only, not published; ~2.8 GB for 6.7M records)
+  fetch.json         how it was fetched; per-page size + BLAKE3; written last
+  metadata.json      Socrata view metadata at fetch start (schema, rowsUpdatedAt)
+  pages/000001.json  raw response bodies, in fetch order
+
+snapshots/<dataset>/<snapshot_hash[0..16]>/     (published)
+  manifest.json        everything in §4; small, fetched first
+  data.arrow           Arrow IPC file; one record batch per chunk
+  cleaning_log.arrow   one row per value a cleaning rule changed (§5)
+  rejects.arrow        one row per source record not admitted (§5)
 ```
 
 - **Chunking.** Each chunk holds exactly 65,536 rows (2^16), except the last.
   So `chunk = row_index >> 16`, with no lookup table. Chunks are the unit of
-  hashing, streaming load, and (later) HTTP range requests. The Arrow IPC
-  footer gives each chunk's byte offset.
-- **Compression.** None in M0. Arrow body compression (LZ4/ZSTD) would need a
-  decompressor in WASM. Whether we add one or rely on HTTP `Content-Encoding`
-  is decided in M4, using the load-time numbers (see ADR 0001).
+  hashing, streaming load, and (later) HTTP range requests.
+- **Compression.** None. See ADR 0001; this is decided in M4.
 - **Dictionaries.** There is one dictionary per string column for the whole
-  file, written once before the first batch. It is sorted by UTF-8 byte order,
-  so code order equals string order. Sort, min, and max on a dictionary column
-  can therefore compare `u32` codes directly.
+  file, sorted by UTF-8 byte order, with `u32` codes. It contains only values
+  used by admitted rows. Code order equals string order.
+- **Schema metadata** on every Arrow file: `receipts.format_version`,
+  `receipts.table` (`data` / `cleaning_log` / `rejects`), and
+  `receipts.snapshot_hash`. A file can't be mixed into another snapshot
+  without `verify` noticing.
 
 ## 3. The NYC 311 schema (source_id 1)
 
 Source: *311 Service Requests from 2010 to Present*, Socrata dataset
 `erm2-nwe9` on `data.cityofnewyork.us`.
-Scope: `created_date >= 2024-01-01T00:00:00 AND created_date < 2026-01-01T00:00:00`
-(two calendar years; see open question Q1).
+Scope: `created_date >= 2024-01-01T00:00:00 AND created_date < 2026-01-01T00:00:00`.
 
-| # | Column | Type | Nullable | Socrata field | Notes |
+| # | Column | Type | Nullable | Socrata field(s) | Accepted Socrata type (CR-01) |
 |---|---|---|---|---|---|
-| 0 | `unique_key` | `i64` | no | `unique_key` (text) | The source's primary key. Parsed as a decimal. |
-| 1 | `created_date` | `timestamp` | no | `created_date` | Naive NYC wall clock, µs (ADR 0003). |
-| 2 | `closed_date` | `timestamp` | yes | `closed_date` | Kept as published, including values before `created_date` and sentinels such as 1900-01-01 (see §1). |
-| 3 | `agency` | `utf8` (dict) | yes | `agency` | Acronym, e.g. `NYPD`, `HPD`. |
-| 4 | `complaint_type` | `utf8` (dict) | yes | `complaint_type` | ~200–300 distinct values. |
-| 5 | `descriptor` | `utf8` (dict) | yes | `descriptor` | Subtype of the complaint; ~1–2k distinct values. |
-| 6 | `location_type` | `utf8` (dict) | yes | `location_type` | |
-| 7 | `incident_zip` | `utf8` (dict) | yes | `incident_zip` | Stored as a string: a ZIP is a category, not a number. |
-| 8 | `borough` | `utf8` (dict) | yes | `borough` | `Unspecified` is kept as a real value from the source, not turned into null. |
-| 9 | `community_board` | `utf8` (dict) | yes | `community_board` | e.g. `12 MANHATTAN`, `0 Unspecified`. |
-| 10 | `status` | `utf8` (dict) | yes | `status` | |
-| 11 | `channel` | `utf8` (dict) | yes | `open_data_channel_type` | `PHONE`, `ONLINE`, `MOBILE`, ... |
-| 12 | `location` | `geo` | yes | `latitude`, `longitude` | Two `f32` arrays with one shared validity bitmap. |
+| 0 | `unique_key` | `i64` | no | `unique_key` | `text` or `number` |
+| 1 | `created_date` | `timestamp` | no | `created_date` | `calendar_date` |
+| 2 | `closed_date` | `timestamp` | yes | `closed_date` | `calendar_date` |
+| 3 | `agency` | `utf8_dict` | yes | `agency` | `text` |
+| 4 | `complaint_type` | `utf8_dict` | yes | `complaint_type` | `text` |
+| 5 | `descriptor` | `utf8_dict` | yes | `descriptor` | `text` |
+| 6 | `location_type` | `utf8_dict` | yes | `location_type` | `text` |
+| 7 | `incident_zip` | `utf8_dict` | yes | `incident_zip` | `text` |
+| 8 | `borough` | `utf8_dict` | yes | `borough` | `text` |
+| 9 | `community_board` | `utf8_dict` | yes | `community_board` | `text` |
+| 10 | `status` | `utf8_dict` | yes | `status` | `text` |
+| 11 | `channel` | `utf8_dict` | yes | `open_data_channel_type` | `text` |
+| 12 | `location` | `geo` | yes | `latitude`, `longitude` | `number` |
 
-**Physical layout per type** (little-endian throughout):
+The plain-English description of each column is in the spec
+(`crates/receipts-snapshot/src/spec.rs`) and is copied into the manifest.
+`closed_date` is kept as published, including values before `created_date`
+and placeholder dates such as 1900-01-01. `borough = 'Unspecified'` is the
+source's own label, so it stays a value, not a null.
 
-| Logical type | Arrow type in `data.arrow` | Values buffer |
+**Physical layout** (little-endian throughout):
+
+| Logical type | Arrow type in `data.arrow` | Bytes per row |
 |---|---|---|
-| `i64` | `Int64` | 8 B/row |
-| `f64` | `Float64` | 8 B/row |
-| `bool` | `Boolean` | 1 bit/row |
-| `timestamp` | `Timestamp(Microsecond, None)` | 8 B/row |
-| `utf8` (dict) | `Dictionary(UInt32, Utf8)` | 4 B/row + dictionary |
-| `geo` | `Struct{lat: Float32, lon: Float32}` | 8 B/row |
+| `i64` | `Int64` | 8 |
+| `f64` | `Float64` | 8 |
+| `bool` | `Boolean` | 1 bit |
+| `timestamp` | `Timestamp(Microsecond, None)`: naive NYC wall clock (ADR 0003) | 8 |
+| `utf8_dict` | `Dictionary(UInt32, Utf8)` | 4 (+ dictionary) |
+| `geo` | `Struct{lat: Float32, lon: Float32}`, nulls on the struct | 8 |
 
-For nullable fixed-width columns, null slots are **zeroed**. Arrow leaves them
-undefined, but we need them fixed so that the hashes are deterministic.
+Null slots in fixed-width columns are written as zero.
 
-**Estimated size:** about 61 B/row, plus validity bitmaps and small
-dictionaries. That is roughly 300 MB for 5M rows and roughly 420 MB for 7M
-rows, before any compression.
+**Measured size:** 69.9 B/row. The 6.7M-row synthetic benchmark produced a
+468 MB `data.arrow` (see `docs/benchmarks/m0.md`).
 
-**Excluded columns** (listed in the manifest with a reason): free-text fields
-(`resolution_description`, addresses, street names, landmark). These are large,
-high-cardinality, and gain nothing from dictionary encoding. Also excluded:
-redundant or derived fields (`agency_name`, `park_borough`,
-`x/y_coordinate_state_plane`, `location`, `city`) and sparse domain-specific
-fields (taxi, bridge/highway, vehicle, facility). Any of these can be added
-later as a new snapshot version.
+**Excluded columns:** 27 Socrata fields, each listed with a reason in
+`excluded_columns` in the manifest. They are free-text and address fields,
+redundant fields, and sparse domain-specific fields.
 
-**Derived columns are deliberately absent.** For example, resolution time
-(`closed_date − created_date`) is a `Map` in a plan, so the reader can see it
-being computed.
+**Derived columns are deliberately absent.** For example, resolution time is a
+`Map` in a plan, so the reader can see it being computed.
 
 ## 4. Manifest (`manifest.json`)
 
-See [`manifest.example.json`](manifest.example.json) for a complete example.
-Its fields:
+[`manifest.example.json`](manifest.example.json) is a real manifest, built
+from 100k synthetic records (`synth --rows 100000 --seed 1`).
 
-- `format_version`: `"receipts-snapshot/1"`.
-- `snapshot_hash`: the content hash of the snapshot (§6). Receipts cite this.
-- `manifest_hash`: BLAKE3 of this file's canonical JSON with the
-  `manifest_hash` field removed. It covers the fetch metadata.
-- `source`: `source_id`, `dataset` name, `portal`, `dataset_id`, `source_url`,
-  `license`/terms URL, and the Socrata `rowsUpdatedAt` seen at fetch time.
-- `fetch`: `started_at` and `finished_at` (UTC, RFC 3339), the exact query
-  (`$select`, `$where`, `$order`, page size), `pages`, `raw_records`,
-  `raw_hash`, and `tool_version` (crate version + git commit).
-  - `raw_hash` is BLAKE3 over the raw response bodies, in page order, each
-    prefixed by its length.
-- `scope`: a human-readable scope sentence plus the machine predicate.
-- `row_count`, `chunk_rows` (65536), `chunk_count`.
-- `sort_key`: `["created_date", "unique_key"]` (§7).
-- `schema[]`: for each column: `name`, `type`, `nullable`, `source_fields[]`,
-  `description` (plain English, shown in the UI), `null_count`, and for
-  dictionary columns `dictionary_size`. Also `column_hash` and
-  `chunk_hashes[]` (hex).
-- `excluded_columns[]`: `{ field, reason }`.
-- `cleaning`: `rules_version`, and per rule `{ id, affected_rows, action }`,
-  plus `cleaning_log_hash`, `rejects_hash`, and `rejected_rows`.
-- `known_issues[]`: plain-English notes the UI can surface. Examples:
-  "About N% of `created_date` values are exactly midnight, which suggests
-  date-only precision." "N rows have `closed_date` before `created_date`."
-  These are counted, not fixed.
+| Field | Meaning |
+|---|---|
+| `format_version` | `"receipts-snapshot/1"` |
+| `snapshot_hash` | Content hash (§6). Receipts cite this. |
+| `manifest_hash` | Hash of this manifest's canonical JSON, with this field removed (§6). |
+| `source` | `source_id`, `dataset`, `portal`, `dataset_id`, `source_url`, `terms_url`, `rows_updated_at` |
+| `fetch` | `started_at`/`finished_at` and the exact query (`select`, `where`, `order`, `pagination`). Also `pages`, `raw_records`, `raw_hash`, `metadata_hash`, `rows_updated_at_start`/`_end` (they differ if the dataset changed mid-fetch), and the fetching `tool_version`. |
+| `build` | `tool_version` of the build (crate version + git commit) |
+| `scope` | `sentence` (plain English) and `predicate` (`column`, `gte`, `lt`) |
+| `row_count`, `chunk_rows`, `chunk_count` | |
+| `sort_key` | `["created_date", "unique_key"]` |
+| `schema[]` | `index`, `name`, `type`, `nullable`, `source_fields`, `description`, `null_count`, `dictionary_size`/`dictionary_hash` (dictionary columns), `column_hash`, `chunk_hashes[]` |
+| `excluded_columns[]` | `{ field, reason }` |
+| `cleaning` | `rules_version`, `rules[]` (`id`, `action`, `count`, what `counts` means, `description`), `rejected_rows`, `cleaning_log_rows`, `cleaning_log_hash`, `rejects_hash` |
+| `known_issues[]` | `{ id, columns, count, sentence }`: counted, not fixed. See cleaning-rules.md. |
+| `files[]` | `{ path, bytes }` for each data file (for progress bars; not hashed) |
+
+The manifest contains only integers and strings, so its canonical form is
+exact.
 
 ## 5. Cleaning log and rejects
 
-Cleaning is itself lineage, so both files are part of the snapshot hash.
+Cleaning is itself lineage, so both files are part of `snapshot_hash`.
 
-`cleaning_log.arrow`: one row per (row, column) value that a rule changed.
+`cleaning_log.arrow` has one row per (row, column) value a logged rule
+changed. It is sorted by (`row_index`, `column`, `rule_id`, `raw_value`).
 
-| Column | Type | Meaning |
+| Column | Arrow type | Meaning |
 |---|---|---|
-| `row_index` | `u32` | Row in `data.arrow` |
-| `column` | `u16` | Schema column index |
-| `rule_id` | dict utf8 | e.g. `CR-06` |
-| `raw_value` | utf8, nullable | The exact source text before the rule applied |
+| `row_index` | `UInt32` | Row in `data.arrow` |
+| `column` | `UInt16` | Schema column index |
+| `rule_id` | `Utf8` | e.g. `CR-07` |
+| `raw_value` | `Utf8`, nullable | Exact source text before the rule. For `location`, the raw JSON pair `[latitude,longitude]`. |
 
-`rejects.arrow`: one row per source record that was not admitted.
+`rejects.arrow` has one row per source record not admitted. It is sorted by
+(`raw_unique_key` with nulls first, `rule_id`, `raw_record`).
 
-| Column | Type | Meaning |
+| Column | Arrow type | Meaning |
 |---|---|---|
-| `reject_index` | `u32` | Position in this file (sorted by `raw_unique_key`, then `rule_id`) |
-| `raw_unique_key` | utf8 | Source key text, as published |
-| `rule_id` | dict utf8 | Why the record was rejected |
-| `raw_record` | utf8 | The record's raw JSON, as fetched |
+| `reject_index` | `UInt32` | 0..n |
+| `raw_unique_key` | `Utf8`, nullable | Key text as published |
+| `rule_id` | `Utf8` | Why it was rejected (exactly one rule per record) |
+| `raw_record` | `Utf8` | The record's JSON, exactly as fetched (including `:id`) |
 
-Rejected rows have no `RowId`, because they never enter the engine. The Claim
-View can still say "N records were excluded while building the snapshot, see
-why", and the UI links to them.
+Rejected rows have no `RowId`, because they never enter the engine. The UI can
+still say "N records were excluded while building the snapshot, see why".
 
-## 6. Content hashing (BLAKE3, ADR 0002)
+## 6. Content hashing (ADR 0002)
 
-We hash a **canonical logical encoding** that we define, not the Arrow IPC
-bytes. IPC bytes depend on writer version, padding, and metadata ordering. All
-integers are little-endian. `‖` means concatenation. Each hash starts with a
-domain tag, so a hash of one kind can never collide with a hash of another
-kind.
+Every hash is BLAKE3 in **`derive_key` mode**, with one context string per
+kind of object. A chunk hash can therefore never collide with a column or
+snapshot hash. We hash a canonical *logical* encoding, never file bytes.
+Integers are little-endian. `‖` means concatenation. `str(x)` means
+`len:u32 ‖ utf8 bytes`. `opt(x)` means `0:u8` for null, or `1:u8 ‖ str(x)`.
 
-```
-chunk_hash(c, k)   = BLAKE3("receipts/chunk/v1" ‖ type_tag:u8 ‖ rows:u32
-                            ‖ validity bits (LSB-first, zero-padded to a byte;
-                              all-ones if the column has no nulls)
-                            ‖ values (null slots zeroed; geo = all lats then all lons;
-                              dict = u32 codes; bool = LSB-first bits))
-dict_hash(c)       = BLAKE3("receipts/dict/v1" ‖ n:u32 ‖ for each entry: len:u32 ‖ bytes)
-column_hash(c)     = BLAKE3("receipts/column/v1" ‖ name_len:u32 ‖ name ‖ type_tag:u8
-                            ‖ dict_hash(c) or 32 zero bytes ‖ chunk_hash(c, 0) ‖ ... )
-snapshot_hash      = BLAKE3("receipts/snapshot/v1" ‖ source_id:u16 ‖ row_count:u32
-                            ‖ canonical_json(scope, sort_key, cleaning.rules_version)
-                            ‖ column_hash(0) ‖ ... ‖ cleaning_log_hash ‖ rejects_hash)
-```
+| Hash | Context | Input |
+|---|---|---|
+| chunk | `receipts snapshot v1 chunk` | `type_tag:u8 ‖ rows:u32 ‖ validity ‖ values` |
+| dictionary | `receipts snapshot v1 dictionary` | `n:u32 ‖ str(entry)*` |
+| column | `receipts snapshot v1 column` | `str(name) ‖ type_tag:u8 ‖ (dictionary hash or 32 zero bytes) ‖ n_chunks:u32 ‖ chunk_hash*` |
+| cleaning log | `receipts snapshot v1 cleaning-log` | `n:u32 ‖ (row_index:u32 ‖ column:u16 ‖ str(rule_id) ‖ opt(raw_value))*` |
+| rejects | `receipts snapshot v1 rejects` | `n:u32 ‖ (opt(raw_unique_key) ‖ str(rule_id) ‖ str(raw_record))*` |
+| **snapshot** | `receipts snapshot v1 snapshot` | `source_id:u16 ‖ row_count:u32 ‖ str(descriptor) ‖ n:u32 ‖ column_hash* ‖ 2:u32 ‖ cleaning_log_hash ‖ rejects_hash` |
+| manifest | `receipts snapshot v1 manifest` | canonical JSON of the manifest without `manifest_hash` |
+| raw pages | `receipts snapshot v1 raw-pages` | `n:u32 ‖ (len:u64 ‖ BLAKE3(page))*` |
+| metadata | `receipts snapshot v1 socrata-metadata` | raw `metadata.json` bytes |
 
-`snapshot_hash` covers **content only**. Fetch timestamps and tool versions
-are left out. Two fetches that produce identical data therefore get the same
-hash, and a receipt stays valid across a re-fetch when nothing changed.
-`manifest_hash` covers everything.
+Details:
 
-Canonical JSON follows RFC 8785 (JCS) for the few JSON fragments we hash. The
-same canonicalizer will be reused for plan hashing in M1.
+- **Validity** is `ceil(rows/8)` bytes, least significant bit first, with
+  padding bits zero. It is always present: a column with no nulls hashes as
+  all-ones.
+- **Values** are written with null slots as zero. By type:
+  - `i64`/`timestamp`: 8 bytes per row.
+  - `f64`: IEEE-754 bits.
+  - `bool`: one bit per row, packed like validity.
+  - dictionary columns: `u32` codes.
+  - `geo`: all latitudes, then all longitudes, as `f32` bits.
+- **Type tags** are `i64`=1, `f64`=2, `bool`=3, `timestamp`=4, `utf8_dict`=5,
+  `geo`=6. They must never be renumbered.
+- **`descriptor`** is the canonical JSON (RFC 8785, integers only) of
+  `{rules_version, scope, sort_key, source: {portal, dataset_id}}`.
 
-## 7. Row order and RowId assignment
+`snapshot_hash` covers **content only**: data, schema names and types, scope,
+source identity, rules version, cleaning log, and rejects. It does not cover
+fetch timestamps or tool versions, so two fetches of identical data get the
+same hash. `manifest_hash` covers everything. A known-answer test in
+`receipts-core` pins the v1 chunk encoding.
 
-1. Fetch with keyset pagination: `$order=unique_key`, and
-   `$where=... AND unique_key > '<last key>'`. This avoids the duplicates and
-   gaps that offset paging produces while the dataset is being updated.
-2. Apply the cleaning rules, logging every change, and move rejects aside.
-3. Sort the admitted rows by (`created_date`, `unique_key`). Row order is then
-   independent of fetch order and API quirks, and it is useful: a time-range
-   `Filter` touches a contiguous run of chunks.
-4. Assign `row_index` = position after the sort.
+## 7. Fetch order, row order, and RowIds (ADR 0007)
+
+1. **Fetch** uses keyset pagination on Socrata's system row id:
+   `$order=:id` and `$where=(<scope>) AND :id > '<last :id>'`. `:id` is
+   selected into every record.
+2. **Clean** (cleaning-rules.md). Duplicates are resolved across all records
+   with a valid key, independent of the order they were fetched in.
+3. **Sort** the admitted rows by (`created_date`, `unique_key`). Keys are
+   unique after cleaning, so the order is total.
+4. **Assign** `row_index` = position after the sort, and
    `RowId = [source_id:16 | 0:16 | row_index:32]`.
 
-## 8. Open questions for review
+The snapshot is independent of fetch order and page size. A test shuffles and
+re-paginates the records and checks that `snapshot_hash` doesn't change.
 
-- **Q1: row count vs. budgets.** 311 has recently run at a bit over 3M
-  requests a year, so two years is probably about 6.5–7M rows. The
-  performance budgets assume 5M. I couldn't confirm the count, because
-  `data.cityofnewyork.us` is blocked from this container's network. Options:
-  (a) keep two years and benchmark on both the full snapshot and a 5M-row
-  prefix; (b) narrow the scope to about 18 months. I recommend (a).
-- **Q2: app token.** Socrata throttles anonymous clients. The CLI would read
-  an optional `SOCRATA_APP_TOKEN` from the environment. The token is never
-  written to the manifest.
-- **Q3: keep raw pages?** `--keep-raw` would write the fetched pages as
-  compressed NDJSON, for local re-cleaning without a re-fetch. They wouldn't
-  be published; `raw_hash` pins them either way.
+## 8. Resolved questions
+
+- **Q1 (rows vs. budgets):** keep two years. Benchmarks use a 6.7M-row
+  synthetic snapshot, plus a 5M-row prefix from M1 onwards.
+- **Q2 (app token):** `fetch` sends `X-App-Token` if `SOCRATA_APP_TOKEN` is
+  set. The token is never written anywhere.
+- **Q3 (keep raw pages):** superseded by the fetch/build split (ADR 0006).
+  Raw pages are always kept locally.

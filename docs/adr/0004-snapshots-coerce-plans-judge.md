@@ -1,6 +1,6 @@
 # 0004. Snapshots coerce, plans judge
 
-- Status: Proposed
+- Status: Accepted (M0 review, 2026-09-24)
 - Date: 2026-09-24
 - Milestone: M0
 
