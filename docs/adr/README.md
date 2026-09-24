@@ -11,4 +11,4 @@ Status values: Proposed → Accepted → (Superseded by NNNN).
 | 0004 | Snapshots coerce, plans judge (minimal cleaning, everything logged) | Accepted |
 | 0005 | WASM threads need a pinned nightly toolchain for one build target | Proposed (decide at M4) |
 | 0006 | Split the snapshot pipeline into `fetch` and `build` via a raw directory | Accepted |
-| 0007 | Keyset pagination on Socrata's `:id`, not `unique_key` or offsets | Accepted (unverified live) |
+| 0007 | Keyset pagination on Socrata's `:id`, not `unique_key` or offsets | Accepted (verified live 2026-09-24) |

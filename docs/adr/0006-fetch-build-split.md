@@ -27,8 +27,8 @@ things came up during implementation:
 ## Consequences
 - The same raw directory always builds the same snapshot. CI and the
   differential oracle run with no network.
-- A two-year fetch needs about 2.8 GB of local disk (measured on synthetic
-  records of realistic width).
+- A two-year fetch needs about 3.1 GB of local disk (3.12 GB measured on the
+  first live fetch, 7.1M records).
 - Resuming a failed fetch isn't supported yet. A failed fetch leaves no
   `fetch.json` and has to be restarted. Pages are retried with exponential
   backoff (6 attempts), so this should be rare.

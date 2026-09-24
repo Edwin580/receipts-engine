@@ -5,8 +5,9 @@ data and see the source rows that produced it, every transform in between,
 and what the number becomes if you exclude any of those rows. The engine is
 custom Rust compiled to WASM and runs entirely in the browser.
 
-**Status:** M0 (snapshot pipeline) implemented, awaiting review. It has not
-yet been run against the live Socrata API (see `docs/adr/0007`).
+**Status:** M0 (snapshot pipeline) implemented, awaiting review. Verified
+against the live Socrata API on 2026-09-24: 7,111,809 rows, snapshot
+`3b42e46a…` (see `docs/benchmarks/m0.md`).
 
 ## Snapshot CLI
 

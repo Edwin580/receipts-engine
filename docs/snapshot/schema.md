@@ -33,7 +33,7 @@ receipts-snapshot verify snapshots/nyc311/<hash16>
 re-run and tested offline, and the raw pages are pinned by hash.
 
 ```
-raw/<name>/                          (local only, not published; ~2.8 GB for 6.7M records)
+raw/<name>/                          (local only, not published; 3.1 GB for the 7.1M real records)
   fetch.json         how it was fetched; per-page size + BLAKE3; written last
   metadata.json      Socrata view metadata at fetch start (schema, rowsUpdatedAt)
   pages/000001.json  raw response bodies, in fetch order
@@ -98,8 +98,9 @@ source's own label, so it stays a value, not a null.
 
 Null slots in fixed-width columns are written as zero.
 
-**Measured size:** 69.9 B/row. The 6.7M-row synthetic benchmark produced a
-468 MB `data.arrow` (see `docs/benchmarks/m0.md`).
+**Measured size:** 69.9 B/row. The real two-year snapshot (7,111,809 rows)
+has a 497 MB `data.arrow`, matching the 6.7M-row synthetic benchmark's
+per-row size (see `docs/benchmarks/m0.md`).
 
 **Excluded columns:** 27 Socrata fields, each listed with a reason in
 `excluded_columns` in the manifest. They are free-text and address fields,
@@ -219,8 +220,14 @@ re-paginates the records and checks that `snapshot_hash` doesn't change.
 
 ## 8. Resolved questions
 
-- **Q1 (rows vs. budgets):** keep two years. Benchmarks use a 6.7M-row
-  synthetic snapshot, plus a 5M-row prefix from M1 onwards.
+- **Q1 (rows vs. budgets):** keep two years. The first live fetch
+  (2026-09-24) gave **7,111,809 rows**, 6% above the 6.7M estimate and 42%
+  above the 5M rows the performance budgets assume. From M1 onwards,
+  benchmarks use the real snapshot plus a 5M-row prefix.
+  **Open decision (before M4):** either restate the budgets for ~7.1M rows,
+  or keep them at 5M and narrow the default scope (for example, 2025 only:
+  3,655,040 rows per the API's `count(*)` on 2026-09-24). This isn't
+  needed for M1–M3, which run natively.
 - **Q2 (app token):** `fetch` sends `X-App-Token` if `SOCRATA_APP_TOKEN` is
   set. The token is never written anywhere.
 - **Q3 (keep raw pages):** superseded by the fetch/build split (ADR 0006).
