@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0d37f4e44f960bef7c0d03c845fcf7c4a98c448952060defdeec036a1b2a1c92 # shrinks to rows = [], steps = [], agg = Some(AggStep { group_by: [], aggs: [(Count, None)], then_sort_desc: None, then_limit: None })
