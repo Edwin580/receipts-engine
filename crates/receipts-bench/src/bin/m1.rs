@@ -6,60 +6,15 @@
 //!
 //! Timing uses `std::time`: criterion isn't an approved dependency yet.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
+use receipts_bench::{Loaded, load};
 use receipts_core::time::parse_naive_timestamp;
 use receipts_core::{Column, ColumnData, ContentHash};
-use receipts_exec::{SourceProvider, Table, execute};
+use receipts_exec::{Table, execute};
 use receipts_plan::*;
-use receipts_snapshot::arrow_io::ReadTable;
-use receipts_snapshot::manifest::DATA_FILE;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-
-struct Loaded {
-    snapshot: ContentHash,
-    title: String,
-    table: Arc<Table>,
-}
-
-impl Catalog for Loaded {
-    fn source(&self, s: &ContentHash) -> Option<SourceInfo> {
-        (*s == self.snapshot).then(|| SourceInfo {
-            title: self.title.clone(),
-            schema: self.table.schema().clone(),
-        })
-    }
-}
-
-impl SourceProvider for Loaded {
-    fn table(&self, s: &ContentHash) -> Option<Arc<Table>> {
-        (*s == self.snapshot).then(|| self.table.clone())
-    }
-}
-
-fn load(dir: &Path) -> Result<Loaded> {
-    let verified = receipts_snapshot::verify::verify(dir).context("verifying snapshot")?;
-    let m = verified.manifest;
-    let data = ReadTable::open(&dir.join(DATA_FILE))?;
-    let mut fields = Vec::new();
-    let mut columns = Vec::new();
-    for (i, info) in m.schema.iter().enumerate() {
-        let col: Column = data.column(i)?;
-        fields.push(Field::new(
-            info.name.clone(),
-            col.data.column_type(),
-            info.nullable,
-        ));
-        columns.push(Arc::new(col));
-    }
-    let table = Table::new(Schema::new(fields), columns).map_err(anyhow::Error::msg)?;
-    Ok(Loaded {
-        snapshot: ContentHash::from_hex(&m.snapshot_hash).context("bad snapshot hash")?,
-        title: m.source.dataset,
-        table: Arc::new(table),
-    })
-}
 
 /// The first `n` rows: the "5M-row prefix" the budgets are stated for.
 fn prefix(t: &Table, n: usize) -> Table {
@@ -250,9 +205,8 @@ fn main() -> Result<()> {
     run("Full snapshot", &full, runs, true)?;
     if full.table.len() > 5_000_000 {
         let p = Loaded {
-            snapshot: full.snapshot,
-            title: full.title.clone(),
             table: Arc::new(prefix(&full.table, 5_000_000)),
+            ..full.clone()
         };
         run("5M-row prefix", &p, runs, false)?;
     }
