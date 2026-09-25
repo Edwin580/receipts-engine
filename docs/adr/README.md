@@ -13,3 +13,4 @@ Status values: Proposed → Accepted → (Superseded by NNNN).
 | 0006 | Split the snapshot pipeline into `fetch` and `build` via a raw directory | Accepted |
 | 0007 | Keyset pagination on Socrata's `:id`, not `unique_key` or offsets | Accepted (verified live 2026-09-24) |
 | 0008 | Plan model: linear typed operators, SQL null semantics, Merkle plan hashes | Proposed (M1) |
+| 0009 | Lineage: always-on per-step mappings, composed on demand | Proposed (M2) |

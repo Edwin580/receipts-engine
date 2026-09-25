@@ -4,6 +4,7 @@
 use crate::eval::cmp_f64;
 use crate::table::{gather, gather_opt};
 use receipts_core::{Column, ColumnData};
+use receipts_lineage::StepLineage;
 use receipts_plan::AggFunc;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -334,4 +335,28 @@ pub(crate) fn key_columns(keys: &[&Column], groups: &Groups, order: &[u32]) -> V
         .map(|&k| groups.first_row[k as usize])
         .collect();
     keys.iter().map(|c| gather(c, &rows)).collect()
+}
+
+/// Lineage of an aggregate: output row `p` (group `order[p]`) combines its
+/// member rows, ascending.
+pub(crate) fn group_lineage(groups: &Groups, order: &[u32]) -> StepLineage {
+    let mut position = vec![0usize; groups.count];
+    for (p, &g) in order.iter().enumerate() {
+        position[g as usize] = p;
+    }
+    let mut offsets = vec![0u32; order.len() + 1];
+    for &g in &groups.ids {
+        offsets[position[g as usize] + 1] += 1;
+    }
+    for p in 0..order.len() {
+        offsets[p + 1] += offsets[p];
+    }
+    let mut fill: Vec<u32> = offsets[..order.len()].to_vec();
+    let mut rows = vec![0u32; groups.ids.len()];
+    for (i, &g) in groups.ids.iter().enumerate() {
+        let p = position[g as usize];
+        rows[fill[p] as usize] = i as u32;
+        fill[p] += 1;
+    }
+    StepLineage::Group { offsets, rows }
 }

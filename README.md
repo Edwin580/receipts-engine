@@ -7,9 +7,9 @@ custom Rust compiled to WASM and runs entirely in the browser.
 
 **Status:** M0 (snapshot pipeline) implemented and verified against the
 live Socrata API on 2026-09-24: 7,111,809 rows, snapshot `3b42e46a…` (see
-`docs/benchmarks/m0.md`). M1 (logical plans and native execution)
-implemented, awaiting review (see `docs/engine/plan.md`,
-`docs/benchmarks/m1.md`).
+`docs/benchmarks/m0.md`). M1 (logical plans and native execution) merged. M2 (row-level lineage:
+backward and forward traces) implemented, awaiting review (see
+`docs/engine/lineage.md`, `docs/benchmarks/m2.md`).
 
 ## Snapshot CLI
 
@@ -34,8 +34,13 @@ Plans are built in Rust or loaded from JSON (`docs/engine/plan.md`),
 validated against a snapshot's schema, hashed, described in plain English,
 and executed natively:
 
+Every execution also records lineage, so any output row can be traced
+back to its source rows, and any source row forward to the results it
+feeds (`docs/engine/lineage.md`).
+
 ```
-cargo run --release -p receipts-bench --bin m1 -- snapshots/nyc311/<hash16>
+cargo run --release -p receipts-bench --bin m1 -- snapshots/nyc311/<hash16>   # plans
+cargo run --release -p receipts-bench --bin m2 -- snapshots/nyc311/<hash16>   # lineage
 ```
 
 ## Layout
@@ -55,7 +60,7 @@ web/                  React + TS frontend                          (M5, not crea
 docs/
   adr/                architecture decision records
   snapshot/           snapshot schema, manifest example, cleaning rules
-  engine/             plan semantics, JSON form, hashing (M1)
+  engine/             plan semantics, JSON form, hashing (M1); lineage (M2)
   benchmarks/         measured numbers per milestone
 ```
 

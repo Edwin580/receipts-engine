@@ -67,6 +67,8 @@ fn vcmp_nulls_first(a: &V, b: &V) -> Ordering {
 struct RTable {
     names: Vec<String>,
     rows: Vec<Vec<V>>,
+    /// Source rows each row derives from (sorted): the reference lineage.
+    prov: Vec<Vec<u32>>,
 }
 
 impl RTable {
@@ -240,12 +242,14 @@ fn run_reference(plan: &Plan, source: &RTable) -> Result<RTable, String> {
             Op::Filter { predicate, .. } => {
                 let t = input.unwrap();
                 let mut rows = Vec::new();
-                for r in &t.rows {
+                let mut prov = Vec::new();
+                for (r, p) in t.rows.iter().zip(&t.prov) {
                     if eval(predicate, &t, r)? == V::Bool(true) {
                         rows.push(r.clone());
+                        prov.push(p.clone());
                     }
                 }
-                RTable { rows, ..t }
+                RTable { rows, prov, ..t }
             }
             Op::Map { name, expr, .. } => {
                 let mut t = input.unwrap();
@@ -268,6 +272,7 @@ fn run_reference(plan: &Plan, source: &RTable) -> Result<RTable, String> {
                         .iter()
                         .map(|r| idx.iter().map(|&i| r[i].clone()).collect())
                         .collect(),
+                    prov: t.prov,
                 }
             }
             Op::Sort { keys, .. } => {
@@ -276,7 +281,9 @@ fn run_reference(plan: &Plan, source: &RTable) -> Result<RTable, String> {
                     .iter()
                     .map(|k| (t.idx(&k.column), k.descending))
                     .collect();
-                t.rows.sort_by(|a, b| {
+                let mut paired: Vec<(Vec<V>, Vec<u32>)> =
+                    t.rows.drain(..).zip(t.prov.drain(..)).collect();
+                paired.sort_by(|(a, _), (b, _)| {
                     for &(i, desc) in &idx {
                         let o = vcmp_nulls_first(&a[i], &b[i]);
                         if o != Ordering::Equal {
@@ -285,11 +292,13 @@ fn run_reference(plan: &Plan, source: &RTable) -> Result<RTable, String> {
                     }
                     Ordering::Equal
                 });
+                (t.rows, t.prov) = paired.into_iter().unzip();
                 t
             }
             Op::Limit { count, .. } => {
                 let mut t = input.unwrap();
                 t.rows.truncate(*count as usize);
+                t.prov.truncate(*count as usize);
                 t
             }
             Op::Aggregate {
@@ -319,7 +328,12 @@ fn run_reference(plan: &Plan, source: &RTable) -> Result<RTable, String> {
                     });
                 }
                 let mut rows = Vec::new();
+                let mut prov = Vec::new();
                 for (key, members) in &groups {
+                    let mut p: Vec<u32> = members.iter().flat_map(|&r| t.prov[r].clone()).collect();
+                    p.sort_unstable();
+                    p.dedup();
+                    prov.push(p);
                     let mut row = key.clone();
                     for a in aggregates {
                         let vals: Vec<V> = match &a.column {
@@ -388,7 +402,7 @@ fn run_reference(plan: &Plan, source: &RTable) -> Result<RTable, String> {
                 }
                 let mut names = group_by.clone();
                 names.extend(aggregates.iter().map(|a| a.name.clone()));
-                RTable { names, rows }
+                RTable { names, rows, prov }
             }
         };
         results.push(out);
@@ -509,12 +523,19 @@ fn from_engine(t: &Table) -> RTable {
                 .collect()
         })
         .collect();
-    RTable { names, rows }
+    RTable {
+        names,
+        rows,
+        prov: vec![],
+    }
 }
 
 struct One(Arc<Table>);
 
 impl SourceProvider for One {
+    fn source_id(&self, _: &ContentHash) -> receipts_core::SourceId {
+        receipts_core::SourceId(3)
+    }
     fn table(&self, s: &ContentHash) -> Option<Arc<Table>> {
         (*s == SNAP).then(|| self.0.clone())
     }
@@ -765,9 +786,14 @@ proptest! {
         let Ok(valid) = validate(plan.clone(), &src) else {
             return Ok(());
         };
+        let n_source = rows.len() as u32;
         let reference = run_reference(
             &plan,
-            &RTable { names: schema().fields.iter().map(|f| f.name.clone()).collect(), rows },
+            &RTable {
+                names: schema().fields.iter().map(|f| f.name.clone()).collect(),
+                rows,
+                prov: (0..n_source).map(|i| vec![i]).collect(),
+            },
         );
         let engine = execute(&valid, &src);
         match (engine, reference) {
@@ -775,6 +801,24 @@ proptest! {
                 let got = from_engine(e.output());
                 prop_assert_eq!(&got.names, &r.names);
                 prop_assert_eq!(got.rows, r.rows, "plan: {:#?}", plan);
+                // Lineage: every output row traces back to exactly the source
+                // rows the reference carried through, and forward traces are
+                // the exact inverse.
+                let out = e.output.index();
+                let lineage = &e.lineage;
+                for (o, want) in r.prov.iter().enumerate() {
+                    let trace = lineage.backward_row(out, o as u32);
+                    prop_assert_eq!(trace.source_rows(), want.as_slice(), "row {} of {:#?}", o, plan);
+                    prop_assert_eq!(trace.source, receipts_core::SourceId(3));
+                    prop_assert_eq!(trace.path.len(), plan.nodes.len());
+                }
+                for src_row in 0..n_source {
+                    let fwd = lineage.forward(0, &[src_row], out);
+                    let want: Vec<u32> = (0..r.prov.len() as u32)
+                        .filter(|&o| r.prov[o as usize].contains(&src_row))
+                        .collect();
+                    prop_assert_eq!(fwd, want, "source row {} of {:#?}", src_row, plan);
+                }
                 // Every intermediate row count is consistent with the table.
                 for t in &e.tables {
                     for c in t.columns() {
