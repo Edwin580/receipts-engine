@@ -3,7 +3,7 @@
 //
 //   node web/engine-test/parity.mjs <snapshot dir> [plan.json]
 //
-// Needs web/pkg/st (tools/wasm/build.sh st) and target/release/receipts-engine
+// Needs web/public/pkg/st (tools/wasm/build.sh st) and target/release/receipts-engine
 // (cargo build --release -p receipts-wasm --bin receipts-engine). Node
 // built-ins only.
 
@@ -21,8 +21,8 @@ if (!dir) {
   process.exit(2);
 }
 
-const { initSync, Engine } = await import(join(root, "web/pkg/st/receipts_wasm.js"));
-initSync({ module: readFileSync(join(root, "web/pkg/st/receipts_wasm_bg.wasm")) });
+const { initSync, Engine } = await import(join(root, "web/public/pkg/st/receipts_wasm.js"));
+initSync({ module: readFileSync(join(root, "web/public/pkg/st/receipts_wasm_bg.wasm")) });
 
 // Timings differ between runs; everything else must match exactly.
 const strip = (v) =>

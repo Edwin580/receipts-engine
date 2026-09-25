@@ -10,8 +10,8 @@ ADR 0011 (verify on load).
 
 | Package | Toolchain | Threads | Size | Needs |
 |---|---|---|---|---|
-| `web/pkg/st` | pinned stable (1.94.1) | 1 | 0.78 MB | any modern browser |
-| `web/pkg/mt` | pinned `nightly-2026-09-20` + `build-std` | rayon pool via `wasm-bindgen-rayon` | 1.27 MB | cross-origin isolation (`COOP: same-origin`, `COEP: require-corp`) |
+| `web/public/pkg/st` | pinned stable (1.94.1) | 1 | 0.78 MB | any modern browser |
+| `web/public/pkg/mt` | pinned `nightly-2026-09-20` + `build-std` | rayon pool via `wasm-bindgen-rayon` | 1.27 MB | cross-origin isolation (`COOP: same-origin`, `COEP: require-corp`) |
 
 Pick `mt` when `crossOriginIsolated` is true and fall back to `st`
 otherwise. Both give **identical** results: parallel code only splits
@@ -57,7 +57,8 @@ const cf = JSON.parse(engine.exclude(run.execution, ids.subarray(0, 1)));
 engine.contributions(run.execution, row, "median_hours", 10);
 // {current, exact, contributing_rows, rows_that_change_it, top: [{source_row, without, removes_group}]}
 
-engine.dropExecution(run.execution);
+engine.matchingRows(planJson);   // Uint32Array: snapshot rows behind a plan's whole output (e.g. a known-issue filter)
+engine.dropExecution(run.execution);   // executions hold their tables: drop the ones no longer shown
 ```
 
 Cells are rendered for JavaScript. Integers beyond 2^53 become strings,

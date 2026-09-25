@@ -23,7 +23,7 @@ requires `-Z build-std`, and `-Z build-std` only exists on nightly.
 3. Wait for build-std to reach stable. There is no date for that.
 
 ## Decision (as implemented)
-- `web/pkg/st` uses pinned stable. `web/pkg/mt` uses `nightly-2026-09-20`
+- `web/public/pkg/st` uses pinned stable. `web/public/pkg/mt` uses `nightly-2026-09-20`
   with `-Z build-std=panic_abort,std`, the `parallel` feature, and
   `wasm-bindgen-rayon` 1.3. `tools/wasm/build.sh` builds both, and CI
   builds both and runs both in headless Chrome.

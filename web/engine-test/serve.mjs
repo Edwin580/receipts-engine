@@ -3,7 +3,8 @@
 //
 //   node web/engine-test/serve.mjs <snapshot dir> [port]
 //
-// Serves web/ at / and the snapshot directory at /snap/.
+// Serves web/ at /, the WASM packages (web/public/pkg) at /pkg/ and the
+// snapshot directory at /snap/.
 
 import { createServer } from "node:http";
 import { createReadStream, statSync } from "node:fs";
@@ -21,22 +22,19 @@ export function serve(snapshotDir, port = 0) {
     const url = new URL(req.url, "http://x");
     const [base, rel] = url.pathname.startsWith("/snap/")
       ? [snapshotDir, url.pathname.slice(6)]
-      : [web, url.pathname.slice(1) || "index.html"];
+      : url.pathname.startsWith("/pkg/")
+        ? [join(web, "public"), url.pathname.slice(1)]
+        : [web, url.pathname.slice(1) || "index.html"];
     const path = normalize(join(base, decodeURIComponent(rel)));
     if (!path.startsWith(normalize(base))) {
       res.writeHead(403).end();
       return;
     }
-    let file = path;
+    const file = path;
     let size;
     try {
-      let st = statSync(file);
-      // wasm-bindgen-rayon's worker imports its package by directory
-      // ("../../.."), which bundlers resolve to the main module.
-      if (st.isDirectory()) {
-        file = join(file, "receipts_wasm.js");
-        st = statSync(file);
-      }
+      const st = statSync(file);
+      if (!st.isFile()) throw new Error("not a file");
       size = st.size;
     } catch {
       res.writeHead(404).end("not found");
