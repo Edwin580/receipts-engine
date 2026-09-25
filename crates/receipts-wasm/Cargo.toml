@@ -7,13 +7,28 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Multi-threaded build (nightly + build-std on wasm32; ADR 0005).
+parallel = ["dep:rayon", "receipts-exec/parallel", "receipts-core/parallel", "dep:wasm-bindgen-rayon"]
+
 [dependencies]
 receipts-core.workspace = true
 receipts-plan.workspace = true
 receipts-exec.workspace = true
 receipts-lineage.workspace = true
 receipts-cf.workspace = true
-receipts-circuit.workspace = true
+serde_json.workspace = true
+wasm-bindgen.workspace = true
+rayon = { workspace = true, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-rayon = { workspace = true, optional = true }
+
+[dev-dependencies]
+receipts-snapshot = { path = "../receipts-snapshot" }
 
 [lints]
 workspace = true
