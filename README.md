@@ -102,6 +102,7 @@ Approved for M4 (2026-09-25):
 | Crate | Used by | Why |
 |---|---|---|
 | `wasm-bindgen` (pinned `=0.2.128`) | wasm | JS bindings; pinned so `wasm-bindgen-cli` matches. |
+| `lz4_flex` (M5) | core; also via `arrow-ipc`'s `lz4` feature | LZ4 frame decoding of snapshot buffers in WASM (ADR 0001). |
 | `rayon` | core, exec, wasm (feature `parallel`) | Deterministic data parallelism (ADR 0005). |
 | `wasm-bindgen-rayon` | wasm (wasm32 + `parallel`) | Rayon's thread pool on Web Workers. |
 

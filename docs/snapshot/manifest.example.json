@@ -1,7 +1,7 @@
 {
   "format_version": "receipts-snapshot/1",
   "snapshot_hash": "33440db6b778821dce32a2ed71243168b70eb03c12dbcb9a2282596760766224",
-  "manifest_hash": "8af682ba26bf4d151885bef4bf57c62d6a3a47fda28fce4c660ea48491c26673",
+  "manifest_hash": "9bdfb8fc93b123f973f1cc7029b519ef78a7dc325154a572790f184e13e3e04b",
   "source": {
     "source_id": 1,
     "dataset": "NYC 311 Service Requests",
@@ -45,10 +45,10 @@
     "metadata_hash": "705f06e9fc02e9eb0491db309c463c2b91009b5653d504d83c4df224f646594d",
     "rows_updated_at_start": null,
     "rows_updated_at_end": null,
-    "tool_version": "receipts-snapshot 0.0.0 (git 61ca22bc5d51)"
+    "tool_version": "receipts-snapshot 0.0.0 (git 545138991ce4)"
   },
   "build": {
-    "tool_version": "receipts-snapshot 0.0.0 (git 61ca22bc5d51)"
+    "tool_version": "receipts-snapshot 0.0.0 (git 545138991ce4)"
   },
   "scope": {
     "sentence": "311 service requests created from 2024-01-01 up to (not including) 2026-01-01, NYC local time.",
@@ -559,15 +559,18 @@
   "files": [
     {
       "path": "data.arrow",
-      "bytes": 7036018
+      "bytes": 4005426,
+      "compression": "lz4_frame"
     },
     {
       "path": "cleaning_log.arrow",
-      "bytes": 8554
+      "bytes": 6250,
+      "compression": "lz4_frame"
     },
     {
       "path": "rejects.arrow",
-      "bytes": 16618
+      "bytes": 7082,
+      "compression": "lz4_frame"
     }
   ]
 }
