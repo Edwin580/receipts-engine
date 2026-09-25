@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 receipts-core.workspace = true
 receipts-plan.workspace = true
+receipts-lineage.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
