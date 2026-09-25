@@ -7,7 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Evaluate expressions and filters on several threads (same results).
+parallel = ["dep:rayon"]
+
 [dependencies]
+rayon = { workspace = true, optional = true }
 receipts-core.workspace = true
 receipts-plan.workspace = true
 receipts-lineage.workspace = true
