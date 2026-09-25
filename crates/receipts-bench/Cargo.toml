@@ -11,6 +11,7 @@ publish.workspace = true
 receipts-core.workspace = true
 receipts-plan.workspace = true
 receipts-exec.workspace = true
+receipts-cf.workspace = true
 receipts-snapshot = { path = "../receipts-snapshot" }
 anyhow.workspace = true
 
