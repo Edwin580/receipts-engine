@@ -11,5 +11,8 @@ publish.workspace = true
 receipts-core.workspace = true
 receipts-plan.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true

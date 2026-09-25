@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 4dbd41e3f4e3a25cae2e663f38963438f0ecc3d0e9218573803a8ad8306ae170 # shrinks to e = InList(Column("a"), [F64(-8.368324491646978e-44)])

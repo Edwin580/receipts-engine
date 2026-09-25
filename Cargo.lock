@@ -771,7 +771,11 @@ dependencies = [
 name = "receipts-bench"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "receipts-core",
+ "receipts-exec",
+ "receipts-plan",
+ "receipts-snapshot",
 ]
 
 [[package]]
@@ -803,6 +807,7 @@ dependencies = [
 name = "receipts-exec"
 version = "0.0.0"
 dependencies = [
+ "proptest",
  "receipts-core",
  "receipts-plan",
 ]
@@ -818,7 +823,9 @@ dependencies = [
 name = "receipts-plan"
 version = "0.0.0"
 dependencies = [
+ "proptest",
  "receipts-core",
+ "serde_json",
 ]
 
 [[package]]

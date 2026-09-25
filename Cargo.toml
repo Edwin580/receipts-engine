@@ -28,7 +28,7 @@ blake3 = "1.8"
 clap = { version = "4.6", features = ["derive"] }
 proptest = "1.11"
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
+serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 ureq = "3.4"
 
 [workspace.lints.rust]

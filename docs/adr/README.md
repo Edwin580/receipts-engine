@@ -12,3 +12,4 @@ Status values: Proposed → Accepted → (Superseded by NNNN).
 | 0005 | WASM threads need a pinned nightly toolchain for one build target | Proposed (decide at M4) |
 | 0006 | Split the snapshot pipeline into `fetch` and `build` via a raw directory | Accepted |
 | 0007 | Keyset pagination on Socrata's `:id`, not `unique_key` or offsets | Accepted (verified live 2026-09-24) |
+| 0008 | Plan model: linear typed operators, SQL null semantics, Merkle plan hashes | Proposed (M1) |
