@@ -772,6 +772,7 @@ name = "receipts-bench"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "receipts-cf",
  "receipts-core",
  "receipts-exec",
  "receipts-plan",
@@ -782,8 +783,11 @@ dependencies = [
 name = "receipts-cf"
 version = "0.0.0"
 dependencies = [
+ "proptest",
  "receipts-core",
+ "receipts-exec",
  "receipts-lineage",
+ "receipts-plan",
 ]
 
 [[package]]
