@@ -7,9 +7,9 @@ custom Rust compiled to WASM and runs entirely in the browser.
 
 **Status:** M0 (snapshot pipeline) implemented and verified against the
 live Socrata API on 2026-09-24: 7,111,809 rows, snapshot `3b42e46a…` (see
-`docs/benchmarks/m0.md`). M1 (plans), M2 (lineage) and M3 (counterfactuals) merged. M4 (the engine
-in the browser: WASM, verify-on-load, threads) implemented, awaiting
-review (see `docs/engine/wasm-api.md`, `docs/benchmarks/m4.md`).
+`docs/benchmarks/m0.md`). M1 (plans), M2 (lineage), M3 (counterfactuals), M4 (the engine in the
+browser) and M5a (LZ4 snapshots) merged. M5b (the web app) implemented,
+awaiting review (see `web/README.md`, `docs/deploy.md`).
 
 ## Snapshot CLI
 
@@ -48,7 +48,7 @@ cargo run --release -p receipts-bench --bin m3 -- snapshots/nyc311/<hash16>   # 
 ## Engine in the browser (M4)
 
 ```
-tools/wasm/build.sh                     # web/pkg/st (stable) and web/pkg/mt (threads; pinned nightly)
+tools/wasm/build.sh                     # web/public/pkg/st (stable) and web/public/pkg/mt (threads; pinned nightly)
 node web/engine-test/serve.mjs snapshots/nyc311/<hash16>     # then open /engine-test/bench.html?build=mt
 node web/engine-test/parity.mjs snapshots/nyc311/<hash16>    # WASM == native
 ```
@@ -56,6 +56,20 @@ node web/engine-test/parity.mjs snapshots/nyc311/<hash16>    # WASM == native
 Needs `rustup target add wasm32-unknown-unknown`, the nightly in
 `tools/wasm/build.sh` (with `rust-src`), and `wasm-bindgen-cli` at the
 version pinned in `Cargo.toml`.
+
+## Web app (M5)
+
+```
+cd web && npm ci
+RECEIPTS_SNAPSHOT_DIR=../snapshots/nyc311/<hash16> npm run dev
+```
+
+See `web/README.md`. Deployment (Cloudflare Pages + R2) is in `docs/deploy.md`.
+
+npm packages (approved for M5, 2026-09-25, all pinned exactly): `react`,
+`react-dom`; dev only: `vite`, `@vitejs/plugin-react`, `typescript`,
+`@types/react`, `@types/react-dom`, `@types/node`, `vitest`,
+`@playwright/test`.
 
 ## Layout
 
@@ -70,10 +84,10 @@ crates/
   receipts-wasm/      wasm-bindgen API surface                     (M4)
   receipts-snapshot/  offline snapshot CLI                         (M0)
   receipts-bench/     benchmarks on real snapshots                 (M1)
-web/
-  engine-test/        browser benchmark, parity test, dev server   (M4)
-  pkg/                WASM builds (generated, not committed)
-                      React + TS frontend                          (M5)
+web/                  React + TS app (Vite); engine in a Web Worker (M5)
+  src/                questions as plans, Pipeline View, receipts, what-ifs
+  public/pkg/         WASM builds (generated, not committed)
+  engine-test/        engine benchmark, parity test, dev server   (M4)
 tools/wasm/           build script for both WASM packages          (M4)
 docs/
   adr/                architecture decision records

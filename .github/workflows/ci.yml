@@ -24,6 +24,8 @@ jobs:
           python3 tools/oracle/snapshot_oracle.py "$RUNNER_TEMP/raw" "$D"
 
   wasm:
+    # WASM builds, parity, browser runs and the web app (which needs the WASM
+    # packages and a snapshot).
     runs-on: ubuntu-latest
     env:
       WASM_BINDGEN: "0.2.128"
@@ -50,3 +52,14 @@ jobs:
           CHROME=$(command -v google-chrome || command -v chromium)
           node web/engine-test/browser-bench.mjs "$D" "$CHROME" st > /dev/null
           node web/engine-test/browser-bench.mjs "$D" "$CHROME" mt > /dev/null
+          echo "SNAPSHOT_DIR=$D" >> "$GITHUB_ENV"
+      - name: Web app (typecheck, unit tests incl. every plan in the real engine, end-to-end)
+        working-directory: web
+        env:
+          RECEIPTS_SNAPSHOT_DIR: ${{ env.SNAPSHOT_DIR }}
+        run: |
+          npm ci --no-audit --no-fund
+          npx tsc --noEmit -p .
+          npx vitest run
+          npx playwright install --with-deps chromium
+          npx playwright test
