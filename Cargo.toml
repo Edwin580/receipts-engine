@@ -22,7 +22,7 @@ receipts-circuit = { path = "crates/receipts-circuit" }
 anyhow = "1"
 arrow-array = "60"
 arrow-buffer = "60"
-arrow-ipc = "60"
+arrow-ipc = { version = "60", features = ["lz4"] }
 arrow-schema = "60"
 blake3 = "1.8"
 clap = { version = "4.6", features = ["derive"] }
@@ -30,6 +30,8 @@ proptest = "1.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 ureq = "3.4"
+# M5 (approved 2026-09-25): LZ4 snapshot compression, decoded in WASM.
+lz4_flex = { version = "0.14", default-features = false, features = ["std", "frame", "safe-decode", "safe-encode"] }
 # M4 (approved 2026-09-25): browser bindings and threads (ADR 0005).
 rayon = "1.12"
 wasm-bindgen = "=0.2.128"

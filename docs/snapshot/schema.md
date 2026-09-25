@@ -48,7 +48,11 @@ snapshots/<dataset>/<snapshot_hash[0..16]>/     (published)
 - **Chunking.** Each chunk holds exactly 65,536 rows (2^16), except the last.
   So `chunk = row_index >> 16`, with no lookup table. Chunks are the unit of
   hashing, streaming load, and (later) HTTP range requests.
-- **Compression.** None. See ADR 0001; this is decided in M4.
+- **Compression.** Each Arrow buffer is an LZ4 frame (Arrow's `LZ4_FRAME`
+  body compression) by default; `build --compression none` writes plain
+  buffers. Hashes cover logical content, so both give the same
+  `snapshot_hash` (ADR 0001, M5 update). `manifest.files[].compression`
+  says which was used.
 - **Dictionaries.** There is one dictionary per string column for the whole
   file, sorted by UTF-8 byte order, with `u32` codes. It contains only values
   used by admitted rows. Code order equals string order.
@@ -129,7 +133,7 @@ from 100k synthetic records (`synth --rows 100000 --seed 1`).
 | `excluded_columns[]` | `{ field, reason }` |
 | `cleaning` | `rules_version`, `rules[]` (`id`, `action`, `count`, what `counts` means, `description`), `rejected_rows`, `cleaning_log_rows`, `cleaning_log_hash`, `rejects_hash` |
 | `known_issues[]` | `{ id, columns, count, sentence }`: counted, not fixed. See cleaning-rules.md. |
-| `files[]` | `{ path, bytes }` for each data file (for progress bars; not hashed) |
+| `files[]` | `{ path, bytes, compression }` for each data file (for progress bars; covered by `manifest_hash`, not by `snapshot_hash`) |
 
 The manifest contains only integers and strings, so its canonical form is
 exact.

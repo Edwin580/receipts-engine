@@ -13,8 +13,9 @@ use arrow_array::{
     RecordBatch, StringArray, StructArray, TimestampMicrosecondArray, UInt16Array, UInt32Array,
 };
 use arrow_buffer::{BooleanBuffer, Buffer, NullBuffer};
+use arrow_ipc::CompressionType;
 use arrow_ipc::reader::FileReader;
-use arrow_ipc::writer::FileWriter;
+use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
 use receipts_core::hash::chunk_ranges;
 use receipts_core::{Bitmap, Column, ColumnData, ContentHash};
@@ -27,6 +28,25 @@ use std::sync::Arc;
 pub const META_FORMAT: &str = "receipts.format_version";
 pub const META_TABLE: &str = "receipts.table";
 pub const META_SNAPSHOT_HASH: &str = "receipts.snapshot_hash";
+
+/// How Arrow IPC buffers are stored. The snapshot hash covers logical
+/// content, so compression never changes it (ADR 0001).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Compression {
+    None,
+    /// Each buffer is one LZ4 frame; decoded in the browser (M5).
+    #[default]
+    Lz4,
+}
+
+impl Compression {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Lz4 => "lz4_frame",
+        }
+    }
+}
 
 fn metadata(table: &str, snapshot_hash: &ContentHash) -> HashMap<String, String> {
     HashMap::from([
@@ -95,6 +115,7 @@ pub fn write_data(
     path: &Path,
     columns: &[(&Column, bool)],
     snapshot_hash: &ContentHash,
+    compression: Compression,
 ) -> Result<()> {
     let (fields, arrays): (Vec<_>, Vec<_>) = columns
         .iter()
@@ -111,17 +132,22 @@ pub fn write_data(
         let cols = arrays.iter().map(|a| a.slice(r.start, r.len())).collect();
         RecordBatch::try_new(schema.clone(), cols)
     });
-    write_file(path, &schema, batches)
+    write_file(path, &schema, batches, compression)
 }
 
 fn write_file(
     path: &Path,
     schema: &Schema,
     batches: impl Iterator<Item = Result<RecordBatch, arrow_schema::ArrowError>>,
+    compression: Compression,
 ) -> Result<()> {
     let file =
         BufWriter::new(File::create(path).with_context(|| format!("creating {}", path.display()))?);
-    let mut writer = FileWriter::try_new(file, schema)?;
+    let options = IpcWriteOptions::default().try_with_compression(match compression {
+        Compression::None => None,
+        Compression::Lz4 => Some(CompressionType::LZ4_FRAME),
+    })?;
+    let mut writer = FileWriter::try_new_with_options(file, schema, options)?;
     for batch in batches {
         writer.write(&batch?)?;
     }
@@ -133,6 +159,7 @@ pub fn write_cleaning_log(
     path: &Path,
     log: &[LogEntry],
     snapshot_hash: &ContentHash,
+    compression: Compression,
 ) -> Result<()> {
     let schema = Schema::new_with_metadata(
         vec![
@@ -159,10 +186,15 @@ pub fn write_cleaning_log(
             )),
         ],
     );
-    write_file(path, &schema, std::iter::once(batch))
+    write_file(path, &schema, std::iter::once(batch), compression)
 }
 
-pub fn write_rejects(path: &Path, rejects: &[Reject], snapshot_hash: &ContentHash) -> Result<()> {
+pub fn write_rejects(
+    path: &Path,
+    rejects: &[Reject],
+    snapshot_hash: &ContentHash,
+    compression: Compression,
+) -> Result<()> {
     let schema = Arc::new(Schema::new_with_metadata(
         vec![
             Field::new("reject_index", DataType::UInt32, false),
@@ -187,7 +219,7 @@ pub fn write_rejects(path: &Path, rejects: &[Reject], snapshot_hash: &ContentHas
             )),
         ],
     );
-    write_file(path, &schema, std::iter::once(batch))
+    write_file(path, &schema, std::iter::once(batch), compression)
 }
 
 /// A decoded Arrow file.

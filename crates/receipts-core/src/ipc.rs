@@ -2,17 +2,19 @@
 //! with no dependencies, so the WASM engine can load snapshots without the
 //! arrow crates.
 //!
-//! It reads exactly what `receipts-snapshot` writes: little-endian,
-//! uncompressed record batches of Int, FloatingPoint, Utf8, Bool, Timestamp
-//! and Struct columns, and dictionary-encoded Utf8 (including delta
-//! dictionaries). Anything else is an error. Every read is bounds-checked:
+//! It reads exactly what `receipts-snapshot` writes: little-endian record
+//! batches of Int, FloatingPoint, Utf8, Bool, Timestamp and Struct columns,
+//! and dictionary-encoded Utf8 (including delta dictionaries), either
+//! uncompressed or with LZ4-frame buffer compression (ADR 0001). Anything else is an error. Every read is bounds-checked:
 //! malformed input returns `Err`, never panics.
 //!
 //! Format references: Arrow columnar spec ("IPC File Format") and
 //! `format/{File,Message,Schema}.fbs`.
 
 use crate::{Bitmap, Column, ColumnData};
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::io::Read;
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -384,8 +386,77 @@ struct BatchReader<'a> {
     body: &'a [u8],
     nodes: Vec<(i64, i64)>,
     buffers: Vec<(i64, i64)>,
+    /// Buffers are LZ4 frames, each prefixed with its uncompressed length.
+    lz4: bool,
     next_node: usize,
     next_buffer: usize,
+}
+
+/// Parses a RecordBatch table (also the payload of a DictionaryBatch).
+fn batch_reader<'a>(rb: &Table<'a>, body: &'a [u8]) -> Result<BatchReader<'a>> {
+    let lz4 = match rb.table(3)? {
+        None => false,
+        Some(c) => {
+            if c.u8(0, 0)? != 0 {
+                return Err("only LZ4_FRAME compression is supported".into());
+            }
+            if c.u8(1, 0)? != 0 {
+                return Err("only per-buffer compression is supported".into());
+            }
+            true
+        }
+    };
+    let structs = |id: usize| -> Result<Vec<(i64, i64)>> {
+        let Some((start, n)) = rb.vector(id)? else {
+            return Ok(Vec::new());
+        };
+        (0..n)
+            .map(|k| {
+                let p = element(start, k, 16)?;
+                Ok((rb.buf.i64(p)?, rb.buf.i64(p + 8)?))
+            })
+            .collect()
+    };
+    Ok(BatchReader {
+        body,
+        nodes: structs(1)?,
+        buffers: structs(2)?,
+        lz4,
+        next_node: 0,
+        next_buffer: 0,
+    })
+}
+
+/// Arrow's compressed buffer: `uncompressed length: i64` (or -1 when the
+/// rest is stored raw), then one LZ4 frame.
+fn decompress(raw: &[u8]) -> Result<Vec<u8>> {
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    let prefix: [u8; 8] = raw
+        .get(..8)
+        .ok_or("compressed buffer is shorter than its length prefix")?
+        .try_into()
+        .expect("8 bytes");
+    let len = i64::from_le_bytes(prefix);
+    if len == -1 {
+        return Ok(raw[8..].to_vec());
+    }
+    let len = usize::try_from(len).map_err(|_| "negative uncompressed length")?;
+    let mut out = Vec::new();
+    // Read at most one byte past the promised size, so a lying prefix is
+    // caught without decoding an arbitrarily large frame.
+    lz4_flex::frame::FrameDecoder::new(&raw[8..])
+        .take(len as u64 + 1)
+        .read_to_end(&mut out)
+        .map_err(|e| format!("LZ4 frame: {e}"))?;
+    if out.len() != len {
+        return Err(format!(
+            "LZ4 buffer decoded to {} bytes, expected {len}",
+            out.len()
+        ));
+    }
+    Ok(out)
 }
 
 impl<'a> BatchReader<'a> {
@@ -399,7 +470,7 @@ impl<'a> BatchReader<'a> {
         let nulls = usize::try_from(nulls).map_err(|_| "negative null count")?;
         Ok((len, nulls))
     }
-    fn buffer(&mut self) -> Result<&'a [u8]> {
+    fn buffer(&mut self) -> Result<Cow<'a, [u8]>> {
         let &(off, len) = self
             .buffers
             .get(self.next_buffer)
@@ -409,7 +480,12 @@ impl<'a> BatchReader<'a> {
             usize::try_from(off).map_err(|_| "negative buffer offset")?,
             usize::try_from(len).map_err(|_| "negative buffer length")?,
         );
-        Buf(self.body).bytes(off, len)
+        let raw = Buf(self.body).bytes(off, len)?;
+        Ok(if self.lz4 {
+            Cow::Owned(decompress(raw)?)
+        } else {
+            Cow::Borrowed(raw)
+        })
     }
 
     fn fixed<const N: usize, T>(&mut self, len: usize, from: fn([u8; N]) -> T) -> Result<Vec<T>> {
@@ -439,7 +515,7 @@ impl<'a> BatchReader<'a> {
             if validity_bytes.len().saturating_mul(8) < len {
                 return Err(format!("{}: validity buffer too short", field.name));
             }
-            let bits = Bitmap::from_bytes(validity_bytes, len);
+            let bits = Bitmap::from_bytes(&validity_bytes, len);
             if bits.count_zeros() != nulls {
                 return Err(format!(
                     "{}: null count doesn't match the validity bitmap",
@@ -480,7 +556,7 @@ impl<'a> BatchReader<'a> {
                 if b.len().saturating_mul(8) < len {
                     return Err(format!("{}: bool buffer too short", field.name));
                 }
-                Values::Bool(Bitmap::from_bytes(b, len))
+                Values::Bool(Bitmap::from_bytes(&b, len))
             }
             IpcType::Utf8 => {
                 let offsets = self.fixed(
@@ -699,34 +775,9 @@ fn message<'a>(bytes: &'a [u8], block: &Block) -> Result<(Table<'a>, &'a [u8])> 
     Ok((msg, body))
 }
 
-fn record_batch<'a>(msg: &Table<'a>) -> Result<(i64, BatchReader<'a>, Table<'a>)> {
+fn record_batch<'a>(msg: &Table<'a>, body: &'a [u8]) -> Result<(i64, BatchReader<'a>)> {
     let rb = msg.table(2)?.ok_or("message without a header")?;
-    if rb.table(3)?.is_some() {
-        return Err("compressed record batches aren't supported".into());
-    }
-    let len = rb.i64(0, 0)?;
-    let structs = |id: usize| -> Result<Vec<(i64, i64)>> {
-        let Some((start, n)) = rb.vector(id)? else {
-            return Ok(Vec::new());
-        };
-        (0..n)
-            .map(|k| {
-                let p = element(start, k, 16)?;
-                Ok((rb.buf.i64(p)?, rb.buf.i64(p + 8)?))
-            })
-            .collect()
-    };
-    Ok((
-        len,
-        BatchReader {
-            body: &[],
-            nodes: structs(1)?,
-            buffers: structs(2)?,
-            next_node: 0,
-            next_buffer: 0,
-        },
-        rb,
-    ))
+    Ok((rb.i64(0, 0)?, batch_reader(&rb, body)?))
 }
 
 /// Decodes a complete Arrow IPC file.
@@ -781,27 +832,7 @@ pub fn read_file(bytes: &[u8]) -> Result<IpcFile> {
             .get(&id)
             .ok_or_else(|| format!("dictionary {id} isn't used by any column"))?;
         let data = db.table(1)?.ok_or("DictionaryBatch without data")?;
-        // Reuse the record-batch parser on the nested RecordBatch table.
-        let structs = |id: usize| -> Result<Vec<(i64, i64)>> {
-            let Some((start, n)) = data.vector(id)? else {
-                return Ok(Vec::new());
-            };
-            (0..n)
-                .map(|k| {
-                    Ok((
-                        data.buf.i64(element(start, k, 16)?)?,
-                        data.buf.i64(element(start, k, 16)? + 8)?,
-                    ))
-                })
-                .collect()
-        };
-        let mut reader = BatchReader {
-            body,
-            nodes: structs(1)?,
-            buffers: structs(2)?,
-            next_node: 0,
-            next_buffer: 0,
-        };
+        let mut reader = batch_reader(&data, body)?;
         let values = reader.array(field, true)?;
         let Values::Utf8(strings) = values.values else {
             return Err("only Utf8 dictionaries are supported".into());
@@ -823,8 +854,7 @@ pub fn read_file(bytes: &[u8]) -> Result<IpcFile> {
         if msg.u8(1, 0)? != 3 {
             return Err("record batch block doesn't hold a RecordBatch".into());
         }
-        let (len, mut reader, _) = record_batch(&msg)?;
-        reader.body = body;
+        let (len, mut reader) = record_batch(&msg, body)?;
         let len = usize::try_from(len).map_err(|_| "negative batch length")?;
         let arrays = fields
             .iter()
