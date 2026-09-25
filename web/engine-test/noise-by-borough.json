@@ -1,0 +1,16 @@
+{"format": "receipts-plan/1",
+ "nodes": [
+  {"op": "scan", "snapshot": "$SNAPSHOT"},
+  {"op": "filter", "input": 0, "predicate": {"call": "and", "args": [
+    {"call": "in", "args": [{"column": "complaint_type"}], "values": [{"str": "Noise - Residential"}, {"str": "Noise - Street/Sidewalk"}]},
+    {"call": "not", "args": [{"call": "is_null", "args": [{"column": "closed_date"}]}]},
+    {"call": "ge", "args": [{"column": "closed_date"}, {"column": "created_date"}]}]}},
+  {"op": "map", "input": 1, "name": "hours_to_close", "expr": {"call": "div", "args": [
+    {"call": "sub", "args": [{"column": "closed_date"}, {"column": "created_date"}]},
+    {"literal": {"i64": "3600000000"}}]}},
+  {"op": "aggregate", "input": 2, "group_by": ["borough"], "aggregates": [
+    {"name": "requests", "fn": "count"},
+    {"name": "median_hours", "fn": "median", "column": "hours_to_close"},
+    {"name": "mean_hours", "fn": "mean", "column": "hours_to_close"}]},
+  {"op": "sort", "input": 3, "keys": [{"column": "median_hours", "order": "desc"}]}],
+ "output": 4}

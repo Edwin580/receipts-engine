@@ -22,3 +22,31 @@ jobs:
           D=$(ls -d "$RUNNER_TEMP"/snap/*/)
           $B verify "$D"
           python3 tools/oracle/snapshot_oracle.py "$RUNNER_TEMP/raw" "$D"
+
+  wasm:
+    runs-on: ubuntu-latest
+    env:
+      WASM_BINDGEN: "0.2.128"
+      NIGHTLY: nightly-2026-09-20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchains (pinned stable + wasm target; dated nightly for the threaded build)
+        run: |
+          STABLE=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$STABLE" --profile minimal -t wasm32-unknown-unknown
+          rustup toolchain install "$NIGHTLY" --profile minimal -c rust-src -t wasm32-unknown-unknown
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked
+      - name: Build both WASM packages
+        run: tools/wasm/build.sh
+      - name: Native parity and browser runs on a synthetic snapshot
+        run: |
+          cargo build --release -p receipts-snapshot -p receipts-wasm --bin receipts-snapshot --bin receipts-engine
+          B=target/release/receipts-snapshot
+          $B synth --out "$RUNNER_TEMP/raw" --rows 80000 --seed 5
+          $B build --raw "$RUNNER_TEMP/raw" --out "$RUNNER_TEMP/snap"
+          D=$(ls -d "$RUNNER_TEMP"/snap/*/)
+          node web/engine-test/parity.mjs "$D"
+          CHROME=$(command -v google-chrome || command -v chromium)
+          node web/engine-test/browser-bench.mjs "$D" "$CHROME" st > /dev/null
+          node web/engine-test/browser-bench.mjs "$D" "$CHROME" mt > /dev/null

@@ -2,3 +2,6 @@
 # Snapshot outputs are published to static hosting, never committed.
 /snapshots/
 *.arrow
+
+# WASM packages are build outputs (tools/wasm/build.sh).
+/web/pkg/
