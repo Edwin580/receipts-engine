@@ -103,6 +103,47 @@ fn reads_a_multi_chunk_snapshot() {
 }
 
 #[test]
+fn compression_changes_bytes_not_content() {
+    let records = synth::generate_311(140_000, 8, &scope());
+    let raw = scratch("raw");
+    synth::write_raw(
+        &raw,
+        &NYC_311,
+        &scope(),
+        &metadata(),
+        synth::paginate(&records, 50_000),
+    )
+    .unwrap();
+    let plain = assemble::build_with(
+        &NYC_311,
+        &raw,
+        &scratch("snap"),
+        arrow_io::Compression::None,
+    )
+    .unwrap();
+    let lz4 =
+        assemble::build_with(&NYC_311, &raw, &scratch("snap"), arrow_io::Compression::Lz4).unwrap();
+    assert_eq!(plain.manifest.snapshot_hash, lz4.manifest.snapshot_hash);
+    assert_ne!(
+        plain.manifest.manifest_hash, lz4.manifest.manifest_hash,
+        "files[] records the compression"
+    );
+    let size = |b: &assemble::Built| b.manifest.files[0].bytes;
+    assert!(
+        size(&lz4) < size(&plain),
+        "{} vs {}",
+        size(&lz4),
+        size(&plain)
+    );
+    assert_eq!(lz4.manifest.files[0].compression, "lz4_frame");
+    let a = read_file(&fs::read(plain.dir.join(DATA_FILE)).unwrap()).unwrap();
+    let b = read_file(&fs::read(lz4.dir.join(DATA_FILE)).unwrap()).unwrap();
+    assert_eq!(a.columns, b.columns);
+    check(&plain);
+    check(&lz4);
+}
+
+#[test]
 fn reads_an_empty_snapshot() {
     check(&build(&[]));
 }

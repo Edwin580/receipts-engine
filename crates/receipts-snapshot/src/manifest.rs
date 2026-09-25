@@ -133,6 +133,14 @@ pub struct KnownIssue {
 pub struct FileInfo {
     pub path: String,
     pub bytes: u64,
+    /// Arrow IPC buffer compression: `"lz4_frame"` or `"none"`. Absent in
+    /// manifests written before M5, which are uncompressed.
+    #[serde(default = "no_compression")]
+    pub compression: String,
+}
+
+fn no_compression() -> String {
+    "none".into()
 }
 
 pub fn type_name(t: ColumnType) -> &'static str {

@@ -1,6 +1,6 @@
 //! `build`: raw directory → snapshot directory.
 
-use crate::arrow_io;
+use crate::arrow_io::{self, Compression};
 use crate::clean::{self, Cleaned};
 use crate::known_issues::known_issues;
 use crate::manifest::{
@@ -24,8 +24,20 @@ pub struct Built {
     pub manifest: Manifest,
 }
 
-/// Builds a snapshot from `raw` into `<out_root>/<snapshot_hash[..16]>/`.
+/// Builds a snapshot from `raw` into `<out_root>/<snapshot_hash[..16]>/`,
+/// with LZ4-compressed Arrow files.
 pub fn build(spec: &DatasetSpec, raw_dir: &Path, out_root: &Path) -> Result<Built> {
+    build_with(spec, raw_dir, out_root, Compression::default())
+}
+
+/// [`build`] with a choice of file compression. The snapshot hash is the
+/// same either way.
+pub fn build_with(
+    spec: &DatasetSpec,
+    raw_dir: &Path,
+    out_root: &Path,
+    compression: Compression,
+) -> Result<Built> {
     let mut phase = Phases::start();
     let raw = RawDir::open(raw_dir)?;
     phase.done("check raw pages");
@@ -83,9 +95,24 @@ pub fn build(spec: &DatasetSpec, raw_dir: &Path, out_root: &Path) -> Result<Buil
         .iter()
         .zip(spec.columns.iter().map(|c| c.kind.nullable()))
         .collect();
-    arrow_io::write_data(&tmp.join(DATA_FILE), &with_nullability, &snapshot)?;
-    arrow_io::write_cleaning_log(&tmp.join(CLEANING_LOG_FILE), &cleaned.log, &snapshot)?;
-    arrow_io::write_rejects(&tmp.join(REJECTS_FILE), &cleaned.rejects, &snapshot)?;
+    arrow_io::write_data(
+        &tmp.join(DATA_FILE),
+        &with_nullability,
+        &snapshot,
+        compression,
+    )?;
+    arrow_io::write_cleaning_log(
+        &tmp.join(CLEANING_LOG_FILE),
+        &cleaned.log,
+        &snapshot,
+        compression,
+    )?;
+    arrow_io::write_rejects(
+        &tmp.join(REJECTS_FILE),
+        &cleaned.rejects,
+        &snapshot,
+        compression,
+    )?;
     phase.done("write arrow files");
 
     let schema = cleaned
@@ -118,6 +145,7 @@ pub fn build(spec: &DatasetSpec, raw_dir: &Path, out_root: &Path) -> Result<Buil
             Ok(FileInfo {
                 path: f.to_string(),
                 bytes: fs::metadata(tmp.join(f))?.len(),
+                compression: compression.name().to_string(),
             })
         })
         .collect::<Result<Vec<_>>>()?;

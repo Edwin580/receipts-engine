@@ -227,22 +227,33 @@ fn verify_detects_tampering() {
     }
     let hash = receipts_core::ContentHash::from_hex(&built.manifest.snapshot_hash).unwrap();
     let refs: Vec<_> = cols.iter().map(|(c, n)| (c, *n)).collect();
-    arrow_io::write_data(&built.dir.join(DATA_FILE), &refs, &hash).unwrap();
+    arrow_io::write_data(&built.dir.join(DATA_FILE), &refs, &hash, Default::default()).unwrap();
     expect_verify_error(&built.dir, "unique_key: chunk 0 hash mismatch");
 
     // A reject quietly dropped.
     let built = build_from(&fixture(), 100);
     let (_, mut rejects) = arrow_io::read_rejects(&built.dir.join(REJECTS_FILE)).unwrap();
     rejects.pop();
-    arrow_io::write_rejects(&built.dir.join(REJECTS_FILE), &rejects, &hash_of(&built)).unwrap();
+    arrow_io::write_rejects(
+        &built.dir.join(REJECTS_FILE),
+        &rejects,
+        &hash_of(&built),
+        Default::default(),
+    )
+    .unwrap();
     expect_verify_error(&built.dir, "rejected_rows");
 
     // A cleaning-log entry altered.
     let built = build_from(&fixture(), 100);
     let (_, mut log) = arrow_io::read_cleaning_log(&built.dir.join(CLEANING_LOG_FILE)).unwrap();
     log[0].raw_value = Some("today".into());
-    arrow_io::write_cleaning_log(&built.dir.join(CLEANING_LOG_FILE), &log, &hash_of(&built))
-        .unwrap();
+    arrow_io::write_cleaning_log(
+        &built.dir.join(CLEANING_LOG_FILE),
+        &log,
+        &hash_of(&built),
+        Default::default(),
+    )
+    .unwrap();
     expect_verify_error(&built.dir, "cleaning_log_hash");
 }
 

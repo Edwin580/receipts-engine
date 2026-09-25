@@ -9,6 +9,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use receipts_snapshot::arrow_io::Compression;
 use receipts_snapshot::raw::Scope;
 use receipts_snapshot::socrata::{self, FetchOptions, UreqTransport};
 use receipts_snapshot::spec::NYC_311;
@@ -44,6 +45,10 @@ enum Command {
         raw: PathBuf,
         #[arg(long)]
         out: PathBuf,
+        /// Arrow buffer compression: lz4 (default) or none. The snapshot
+        /// hash doesn't depend on it.
+        #[arg(long, default_value = "lz4")]
+        compression: String,
     },
     /// Re-derive every hash in a snapshot directory and compare with its manifest.
     Verify { dir: PathBuf },
@@ -94,8 +99,17 @@ fn main() -> Result<()> {
                 out.display()
             );
         }
-        Command::Build { raw, out } => {
-            let built = assemble::build(&NYC_311, &raw, &out)?;
+        Command::Build {
+            raw,
+            out,
+            compression,
+        } => {
+            let compression = match compression.as_str() {
+                "lz4" => Compression::Lz4,
+                "none" => Compression::None,
+                other => anyhow::bail!("unknown compression {other:?}: use lz4 or none"),
+            };
+            let built = assemble::build_with(&NYC_311, &raw, &out, compression)?;
             let m = &built.manifest;
             println!("snapshot {}", m.snapshot_hash);
             println!(
