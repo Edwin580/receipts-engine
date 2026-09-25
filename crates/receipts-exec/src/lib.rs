@@ -61,6 +61,33 @@ impl Execution {
 }
 
 pub fn execute(plan: &ValidPlan, sources: &dyn SourceProvider) -> Result<Execution, ExecError> {
+    execute_inner(plan, sources, None)
+}
+
+/// Source rows to leave out of one snapshot (a counterfactual, M3).
+#[derive(Clone, Copy, Debug)]
+pub struct Exclusion<'a> {
+    pub snapshot: ContentHash,
+    /// Snapshot row indices; order and duplicates don't matter.
+    pub rows: &'a [u32],
+}
+
+/// Executes the plan as if the excluded rows weren't in the snapshot.
+/// Scans record a `SourceSubset` lineage, so traces still name the
+/// original snapshot rows.
+pub fn execute_excluding(
+    plan: &ValidPlan,
+    sources: &dyn SourceProvider,
+    exclusion: Exclusion<'_>,
+) -> Result<Execution, ExecError> {
+    execute_inner(plan, sources, Some(exclusion))
+}
+
+fn execute_inner(
+    plan: &ValidPlan,
+    sources: &dyn SourceProvider,
+    exclusion: Option<Exclusion<'_>>,
+) -> Result<Execution, ExecError> {
     let n = plan.nodes().len();
     let mut tables: Vec<Arc<Table>> = Vec::with_capacity(n);
     let mut steps = Vec::with_capacity(n);
@@ -68,20 +95,111 @@ pub fn execute(plan: &ValidPlan, sources: &dyn SourceProvider) -> Result<Executi
         let node = NodeId(i as u32);
         let err = |message: String| ExecError { node, message };
         let input = op.input().map(|id| tables[id.index()].clone());
-        let (table, lineage) = run(plan, node, op, input.as_deref(), sources).map_err(err)?;
+        let (table, lineage) =
+            run(plan, node, op, input.as_deref(), sources, exclusion).map_err(err)?;
         tables.push(table);
         steps.push(lineage);
     }
-    let inputs = plan
-        .nodes()
-        .iter()
-        .map(|op| op.input().map(NodeId::index))
-        .collect();
     Ok(Execution {
         tables,
-        lineage: Arc::new(LineageStore::new(steps, inputs)),
+        lineage: Arc::new(LineageStore::new(steps, inputs_of(plan))),
         output: plan.output(),
     })
+}
+
+fn inputs_of(plan: &ValidPlan) -> Vec<Option<usize>> {
+    plan.nodes()
+        .iter()
+        .map(|op| op.input().map(NodeId::index))
+        .collect()
+}
+
+/// Replaces `node`'s result in `base` and re-runs only the steps that
+/// depend on it; every other step's table and lineage is reused.
+pub fn rerun_from(
+    plan: &ValidPlan,
+    base: &Execution,
+    node: NodeId,
+    table: Arc<Table>,
+    lineage: StepLineage,
+    sources: &dyn SourceProvider,
+) -> Result<Execution, ExecError> {
+    let n = plan.nodes().len();
+    let mut dirty = vec![false; n];
+    let mut tables: Vec<Arc<Table>> = Vec::with_capacity(n);
+    let mut steps = Vec::with_capacity(n);
+    for (i, op) in plan.nodes().iter().enumerate() {
+        if i == node.index() {
+            dirty[i] = true;
+            tables.push(table.clone());
+            steps.push(lineage.clone());
+            continue;
+        }
+        dirty[i] = op.input().is_some_and(|id| dirty[id.index()]);
+        if !dirty[i] {
+            tables.push(base.tables[i].clone());
+            steps.push(base.lineage.step(i).clone());
+            continue;
+        }
+        let id = NodeId(i as u32);
+        let input = op.input().map(|id| tables[id.index()].clone());
+        let (t, l) = run(plan, id, op, input.as_deref(), sources, None)
+            .map_err(|message| ExecError { node: id, message })?;
+        tables.push(t);
+        steps.push(l);
+    }
+    Ok(Execution {
+        tables,
+        lineage: Arc::new(LineageStore::new(steps, inputs_of(plan))),
+        output: plan.output(),
+    })
+}
+
+/// Runs aggregate step `node` over only the given rows of its input (in
+/// the given order, which should be ascending to match a full run). The
+/// lineage refers to `input`'s row indices.
+pub fn aggregate_subset(
+    plan: &ValidPlan,
+    node: NodeId,
+    input: &Table,
+    rows: &[u32],
+) -> Result<(Table, StepLineage), ExecError> {
+    let op = &plan.nodes()[node.index()];
+    assert!(
+        matches!(op, Op::Aggregate { .. }),
+        "step {} is not an aggregate",
+        node.0
+    );
+    let sub = input.gather(rows);
+    let err = |message: String| ExecError { node, message };
+    let (table, lineage) = run(plan, node, op, Some(&sub), &NoSources, None).map_err(err)?;
+    let StepLineage::Group {
+        offsets,
+        rows: members,
+    } = lineage
+    else {
+        unreachable!("aggregates record group lineage")
+    };
+    let members = members.iter().map(|&m| rows[m as usize]).collect();
+    let table = Arc::unwrap_or_clone(table);
+    Ok((
+        table,
+        StepLineage::Group {
+            offsets,
+            rows: members,
+        },
+    ))
+}
+
+struct NoSources;
+
+impl SourceProvider for NoSources {
+    fn table(&self, _: &ContentHash) -> Option<Arc<Table>> {
+        None
+    }
+    fn source_id(&self, _: &ContentHash) -> SourceId {
+        unreachable!("only scans ask for sources")
+    }
 }
 
 fn run(
@@ -90,6 +208,7 @@ fn run(
     op: &Op,
     input: Option<&Table>,
     sources: &dyn SourceProvider,
+    exclusion: Option<Exclusion<'_>>,
 ) -> Result<(Arc<Table>, StepLineage), String> {
     let schema = plan.schema(node).clone();
     let input = || input.expect("non-scan ops have an input");
@@ -111,8 +230,27 @@ fn run(
             if t.len() > u32::MAX as usize {
                 return Err("a snapshot can't have more than 2^32 rows".into());
             }
+            let source = sources.source_id(snapshot);
+            if let Some(ex) = exclusion.filter(|ex| ex.snapshot == *snapshot) {
+                let mut drop = vec![false; t.len()];
+                for &r in ex.rows {
+                    if let Some(d) = drop.get_mut(r as usize) {
+                        *d = true;
+                    }
+                }
+                let keep: Vec<u32> = (0..t.len() as u32).filter(|&r| !drop[r as usize]).collect();
+                let lineage = StepLineage::SourceSubset {
+                    source,
+                    source_len: t.len() as u32,
+                    rows: keep,
+                };
+                let StepLineage::SourceSubset { rows, .. } = &lineage else {
+                    unreachable!()
+                };
+                return Ok((Arc::new(t.gather(rows)), lineage));
+            }
             let lineage = StepLineage::Source {
-                source: sources.source_id(snapshot),
+                source,
                 len: t.len() as u32,
             };
             return Ok((t, lineage));

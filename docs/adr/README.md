@@ -14,3 +14,4 @@ Status values: Proposed → Accepted → (Superseded by NNNN).
 | 0007 | Keyset pagination on Socrata's `:id`, not `unique_key` or offsets | Accepted (verified live 2026-09-24) |
 | 0008 | Plan model: linear typed operators, SQL null semantics, Merkle plan hashes | Proposed (M1) |
 | 0009 | Lineage: always-on per-step mappings, composed on demand | Proposed (M2) |
+| 0010 | Counterfactuals: exact incremental recomputation, with full re-run as the fallback | Proposed (M3) |

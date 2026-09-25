@@ -17,13 +17,22 @@ use std::sync::{Arc, Mutex, OnceLock};
 pub enum StepLineage {
     /// A scan: output row `i` is row `i` of the snapshot `source`.
     Source { source: SourceId, len: u32 },
+    /// A scan of part of a snapshot of `source_len` rows: output row `i` is
+    /// snapshot row `rows[i]`. Counterfactuals (M3) scan a snapshot minus
+    /// the excluded rows this way, so traces still name original rows.
+    SourceSubset {
+        source: SourceId,
+        source_len: u32,
+        rows: Vec<u32>,
+    },
     /// Output row `i` is input row `i`, for `i < len` (map, project, and
     /// limit, which keeps a prefix).
     Identity { len: u32 },
     /// Output row `i` is input row `rows[i]` (filter, sort).
     Select { rows: Vec<u32> },
     /// Output row `g` combines input rows `rows[offsets[g]..offsets[g + 1]]`,
-    /// ascending (aggregate). Every input row belongs to exactly one group.
+    /// ascending (aggregate). An input row belongs to at most one group:
+    /// after an exclusion (M3), excluded rows belong to none.
     Group { offsets: Vec<u32>, rows: Vec<u32> },
 }
 
@@ -32,7 +41,7 @@ impl StepLineage {
     pub fn len(&self) -> usize {
         match self {
             Self::Source { len, .. } | Self::Identity { len } => *len as usize,
-            Self::Select { rows } => rows.len(),
+            Self::Select { rows } | Self::SourceSubset { rows, .. } => rows.len(),
             Self::Group { offsets, .. } => offsets.len() - 1,
         }
     }
@@ -45,7 +54,7 @@ impl StepLineage {
     pub fn heap_bytes(&self) -> usize {
         match self {
             Self::Source { .. } | Self::Identity { .. } => 0,
-            Self::Select { rows } => rows.len() * 4,
+            Self::Select { rows } | Self::SourceSubset { rows, .. } => rows.len() * 4,
             Self::Group { offsets, rows } => (offsets.len() + rows.len()) * 4,
         }
     }
@@ -116,7 +125,10 @@ impl LineageStore {
         for (i, (step, input)) in steps.iter().zip(&inputs).enumerate() {
             let in_len = match (step, input) {
                 (StepLineage::Source { len, .. }, None) => *len as usize,
-                (StepLineage::Source { .. }, Some(_)) => panic!("step {i}: a scan has no input"),
+                (StepLineage::SourceSubset { source_len, .. }, None) => *source_len as usize,
+                (StepLineage::Source { .. } | StepLineage::SourceSubset { .. }, Some(_)) => {
+                    panic!("step {i}: a scan has no input")
+                }
                 (_, None) => panic!("step {i}: only scans have no input"),
                 (_, Some(j)) => {
                     assert!(*j < i, "step {i} reads a later step {j}");
@@ -126,13 +138,14 @@ impl LineageStore {
             let ok = match step {
                 StepLineage::Source { .. } => true,
                 StepLineage::Identity { len } => *len as usize <= in_len,
-                StepLineage::Select { rows } => rows.iter().all(|&r| (r as usize) < in_len),
+                StepLineage::Select { rows } | StepLineage::SourceSubset { rows, .. } => {
+                    rows.iter().all(|&r| (r as usize) < in_len)
+                }
                 StepLineage::Group { offsets, rows } => {
                     offsets.first() == Some(&0)
                         && offsets.last().is_some_and(|&l| l as usize == rows.len())
                         && offsets.windows(2).all(|w| w[0] <= w[1])
-                        && rows.len() == in_len
-                        && rows.iter().all(|&r| (r as usize) < in_len)
+                        && distinct_below(rows, in_len)
                 }
             };
             assert!(
@@ -155,6 +168,27 @@ impl LineageStore {
         &self.steps[node]
     }
 
+    /// The step that `node` reads, or `None` for a scan.
+    pub fn input(&self, node: usize) -> Option<usize> {
+        self.inputs[node]
+    }
+
+    /// The snapshot row behind row `row` of `node`, if every step between
+    /// them maps rows one to one (no aggregate in between).
+    pub fn source_row(&self, node: usize, row: u32) -> Option<u32> {
+        let (mut at, mut row) = (node, row);
+        loop {
+            match &self.steps[at] {
+                StepLineage::Source { .. } => return Some(row),
+                StepLineage::SourceSubset { rows, .. } => return Some(rows[row as usize]),
+                StepLineage::Identity { .. } => {}
+                StepLineage::Select { rows } => row = rows[row as usize],
+                StepLineage::Group { .. } => return None,
+            }
+            at = self.inputs[at].expect("non-scan steps have an input");
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.steps.len()
     }
@@ -172,7 +206,9 @@ impl LineageStore {
     /// The input rows that the given output rows of `node` derive from.
     fn step_back(&self, node: usize, rows: &[u32]) -> Vec<u32> {
         let mut out: Vec<u32> = match &self.steps[node] {
-            StepLineage::Source { .. } => unreachable!("scans are the end of a trace"),
+            StepLineage::Source { .. } | StepLineage::SourceSubset { .. } => {
+                unreachable!("scans are the end of a trace")
+            }
             StepLineage::Identity { .. } => return rows.to_vec(),
             StepLineage::Select { rows: map } => rows.iter().map(|&r| map[r as usize]).collect(),
             StepLineage::Group {
@@ -213,9 +249,30 @@ impl LineageStore {
                 node: at,
                 rows: current,
             };
-            if let StepLineage::Source { source, .. } = self.steps[at] {
-                path.push(step);
-                return Trace { path, source };
+            match &self.steps[at] {
+                StepLineage::Source { source, .. } => {
+                    path.push(step);
+                    return Trace {
+                        path,
+                        source: *source,
+                    };
+                }
+                // The scan's entry lists snapshot rows, not positions in
+                // the subset.
+                StepLineage::SourceSubset { source, rows, .. } => {
+                    let mut mapped: Vec<u32> =
+                        step.rows.iter().map(|&r| rows[r as usize]).collect();
+                    mapped.sort_unstable();
+                    path.push(TraceStep {
+                        node: at,
+                        rows: mapped,
+                    });
+                    return Trace {
+                        path,
+                        source: *source,
+                    };
+                }
+                _ => {}
             }
             current = self.step_back(at, &step.rows);
             path.push(step);
@@ -242,7 +299,7 @@ impl LineageStore {
         self.inverses[node].get_or_init(|| {
             let in_len = self.input_lens[node];
             match &self.steps[node] {
-                StepLineage::Select { rows } => {
+                StepLineage::Select { rows } | StepLineage::SourceSubset { rows, .. } => {
                     let mut inv = vec![u32::MAX; in_len];
                     for (out, &r) in rows.iter().enumerate() {
                         inv[r as usize] = out as u32;
@@ -250,7 +307,7 @@ impl LineageStore {
                     Inverse::Select(inv)
                 }
                 StepLineage::Group { offsets, rows } => {
-                    let mut group_of = vec![0u32; in_len];
+                    let mut group_of = vec![u32::MAX; in_len];
                     for g in 0..offsets.len() - 1 {
                         for &r in &rows[offsets[g] as usize..offsets[g + 1] as usize] {
                             group_of[r as usize] = g as u32;
@@ -273,7 +330,10 @@ impl LineageStore {
     /// which returns the rows unchanged).
     pub fn forward(&self, scan: usize, source_rows: &[u32], node: usize) -> Vec<u32> {
         assert!(
-            matches!(self.steps[scan], StepLineage::Source { .. }),
+            matches!(
+                self.steps[scan],
+                StepLineage::Source { .. } | StepLineage::SourceSubset { .. }
+            ),
             "step {scan} is not a scan"
         );
         // Chain from the scan up to `node`.
@@ -287,9 +347,26 @@ impl LineageStore {
         let mut current: Vec<u32> = source_rows.to_vec();
         current.sort_unstable();
         current.dedup();
+        // Rows past the end of the snapshot reach nothing.
+        if let StepLineage::Source { len, .. } = self.steps[scan] {
+            current.retain(|&r| r < len);
+        }
+        if matches!(self.steps[scan], StepLineage::SourceSubset { .. }) {
+            // Snapshot rows to positions in the subset; excluded rows reach
+            // nothing.
+            let Inverse::Select(inv) = self.inverse(scan) else {
+                unreachable!()
+            };
+            current = current
+                .iter()
+                .filter_map(|&r| inv.get(r as usize).copied())
+                .filter(|&p| p != u32::MAX)
+                .collect();
+            current.sort_unstable();
+        }
         for &step in &chain[1..] {
             current = match &self.steps[step] {
-                StepLineage::Source { .. } => unreachable!(),
+                StepLineage::Source { .. } | StepLineage::SourceSubset { .. } => unreachable!(),
                 StepLineage::Identity { len } => {
                     current.retain(|&r| r < *len);
                     current
@@ -311,6 +388,13 @@ impl LineageStore {
         }
         current
     }
+}
+
+/// Every entry is below `bound` and appears once.
+fn distinct_below(rows: &[u32], bound: usize) -> bool {
+    let mut seen = vec![false; bound];
+    rows.iter()
+        .all(|&r| (r as usize) < bound && !std::mem::replace(&mut seen[r as usize], true))
 }
 
 #[cfg(test)]
@@ -393,6 +477,51 @@ mod tests {
         let b = s.backward_row(4, 0);
         assert!(Arc::ptr_eq(&a, &b));
         assert_eq!(*a, s.backward(4, &[0]));
+    }
+
+    #[test]
+    fn subsets_and_partial_groups_trace_original_rows() {
+        // Snapshot of 5 rows minus rows 1 and 3; one group of the rest
+        // except subset position 0 (snapshot row 0), which was excluded
+        // further down.
+        let s = LineageStore::new(
+            vec![
+                StepLineage::SourceSubset {
+                    source: SourceId(2),
+                    source_len: 5,
+                    rows: vec![0, 2, 4],
+                },
+                StepLineage::Group {
+                    offsets: vec![0, 2],
+                    rows: vec![1, 2],
+                },
+            ],
+            vec![None, Some(0)],
+        );
+        assert_eq!(s.backward(1, &[0]).source_rows(), &[2, 4]);
+        assert_eq!(s.backward(0, &[0, 2]).source_rows(), &[0, 4]);
+        assert_eq!(s.forward(0, &[4], 1), vec![0]);
+        assert_eq!(s.forward(0, &[0], 1), Vec::<u32>::new()); // in no group
+        assert_eq!(s.forward(0, &[1, 3], 1), Vec::<u32>::new()); // not in the subset
+        assert_eq!(s.forward(0, &[3, 4], 0), vec![2]);
+    }
+
+    #[test]
+    #[should_panic(expected = "doesn't fit")]
+    fn rejects_duplicate_group_members() {
+        LineageStore::new(
+            vec![
+                StepLineage::Source {
+                    source: SourceId(1),
+                    len: 3,
+                },
+                StepLineage::Group {
+                    offsets: vec![0, 2],
+                    rows: vec![1, 1],
+                },
+            ],
+            vec![None, Some(0)],
+        );
     }
 
     #[test]

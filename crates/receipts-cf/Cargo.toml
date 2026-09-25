@@ -10,6 +10,11 @@ publish.workspace = true
 [dependencies]
 receipts-core.workspace = true
 receipts-lineage.workspace = true
+receipts-plan.workspace = true
+receipts-exec.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
 
 [lints]
 workspace = true

@@ -7,9 +7,10 @@ custom Rust compiled to WASM and runs entirely in the browser.
 
 **Status:** M0 (snapshot pipeline) implemented and verified against the
 live Socrata API on 2026-09-24: 7,111,809 rows, snapshot `3b42e46a…` (see
-`docs/benchmarks/m0.md`). M1 (logical plans and native execution) merged. M2 (row-level lineage:
-backward and forward traces) implemented, awaiting review (see
-`docs/engine/lineage.md`, `docs/benchmarks/m2.md`).
+`docs/benchmarks/m0.md`). M1 (logical plans and native execution) and M2 (row-level lineage)
+merged. M3 (counterfactuals: what a number becomes without chosen rows)
+implemented, awaiting review (see `docs/engine/counterfactuals.md`,
+`docs/benchmarks/m3.md`).
 
 ## Snapshot CLI
 
@@ -36,11 +37,13 @@ and executed natively:
 
 Every execution also records lineage, so any output row can be traced
 back to its source rows, and any source row forward to the results it
-feeds (`docs/engine/lineage.md`).
+feeds (`docs/engine/lineage.md`). Counterfactuals re-derive a result
+without chosen rows, exactly (`docs/engine/counterfactuals.md`).
 
 ```
 cargo run --release -p receipts-bench --bin m1 -- snapshots/nyc311/<hash16>   # plans
 cargo run --release -p receipts-bench --bin m2 -- snapshots/nyc311/<hash16>   # lineage
+cargo run --release -p receipts-bench --bin m3 -- snapshots/nyc311/<hash16>   # counterfactuals
 ```
 
 ## Layout
@@ -60,7 +63,7 @@ web/                  React + TS frontend                          (M5, not crea
 docs/
   adr/                architecture decision records
   snapshot/           snapshot schema, manifest example, cleaning rules
-  engine/             plan semantics, JSON form, hashing (M1); lineage (M2)
+  engine/             plans (M1), lineage (M2), counterfactuals (M3)
   benchmarks/         measured numbers per milestone
 ```
 
