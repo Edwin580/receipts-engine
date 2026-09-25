@@ -7,10 +7,9 @@ custom Rust compiled to WASM and runs entirely in the browser.
 
 **Status:** M0 (snapshot pipeline) implemented and verified against the
 live Socrata API on 2026-09-24: 7,111,809 rows, snapshot `3b42e46a…` (see
-`docs/benchmarks/m0.md`). M1 (logical plans and native execution) and M2 (row-level lineage)
-merged. M3 (counterfactuals: what a number becomes without chosen rows)
-implemented, awaiting review (see `docs/engine/counterfactuals.md`,
-`docs/benchmarks/m3.md`).
+`docs/benchmarks/m0.md`). M1 (plans), M2 (lineage) and M3 (counterfactuals) merged. M4 (the engine
+in the browser: WASM, verify-on-load, threads) implemented, awaiting
+review (see `docs/engine/wasm-api.md`, `docs/benchmarks/m4.md`).
 
 ## Snapshot CLI
 
@@ -46,6 +45,18 @@ cargo run --release -p receipts-bench --bin m2 -- snapshots/nyc311/<hash16>   # 
 cargo run --release -p receipts-bench --bin m3 -- snapshots/nyc311/<hash16>   # counterfactuals
 ```
 
+## Engine in the browser (M4)
+
+```
+tools/wasm/build.sh                     # web/pkg/st (stable) and web/pkg/mt (threads; pinned nightly)
+node web/engine-test/serve.mjs snapshots/nyc311/<hash16>     # then open /engine-test/bench.html?build=mt
+node web/engine-test/parity.mjs snapshots/nyc311/<hash16>    # WASM == native
+```
+
+Needs `rustup target add wasm32-unknown-unknown`, the nightly in
+`tools/wasm/build.sh` (with `rust-src`), and `wasm-bindgen-cli` at the
+version pinned in `Cargo.toml`.
+
 ## Layout
 
 ```
@@ -59,11 +70,15 @@ crates/
   receipts-wasm/      wasm-bindgen API surface                     (M4)
   receipts-snapshot/  offline snapshot CLI                         (M0)
   receipts-bench/     benchmarks on real snapshots                 (M1)
-web/                  React + TS frontend                          (M5, not created yet)
+web/
+  engine-test/        browser benchmark, parity test, dev server   (M4)
+  pkg/                WASM builds (generated, not committed)
+                      React + TS frontend                          (M5)
+tools/wasm/           build script for both WASM packages          (M4)
 docs/
   adr/                architecture decision records
   snapshot/           snapshot schema, manifest example, cleaning rules
-  engine/             plans (M1), lineage (M2), counterfactuals (M3)
+  engine/             plans (M1), lineage (M2), counterfactuals (M3), WASM API (M4)
   benchmarks/         measured numbers per milestone
 ```
 
@@ -81,6 +96,14 @@ Every dependency is proposed before it's added. Approved for M0:
 | `clap` | snapshot | CLI arguments. |
 | `anyhow` | snapshot | Error context in the offline CLI. |
 | `proptest` (dev) | core | Property tests. |
+
+Approved for M4 (2026-09-25):
+
+| Crate | Used by | Why |
+|---|---|---|
+| `wasm-bindgen` (pinned `=0.2.128`) | wasm | JS bindings; pinned so `wasm-bindgen-cli` matches. |
+| `rayon` | core, exec, wasm (feature `parallel`) | Deterministic data parallelism (ADR 0005). |
+| `wasm-bindgen-rayon` | wasm (wasm32 + `parallel`) | Rayon's thread pool on Web Workers. |
 
 `roaring` was proposed for M0 but wasn't needed: the manifest counts rule
 applications, and the cleaning log lists rows directly. It will come with

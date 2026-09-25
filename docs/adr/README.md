@@ -9,9 +9,10 @@ Status values: Proposed → Accepted → (Superseded by NNNN).
 | 0002 | Content hashing over a canonical logical encoding, not IPC bytes | Accepted |
 | 0003 | Timestamps are naive NYC wall-clock microseconds | Accepted |
 | 0004 | Snapshots coerce, plans judge (minimal cleaning, everything logged) | Accepted |
-| 0005 | WASM threads need a pinned nightly toolchain for one build target | Proposed (decide at M4) |
+| 0005 | WASM threads need a pinned nightly toolchain for one build target | Accepted (M4: both builds) |
 | 0006 | Split the snapshot pipeline into `fetch` and `build` via a raw directory | Accepted |
 | 0007 | Keyset pagination on Socrata's `:id`, not `unique_key` or offsets | Accepted (verified live 2026-09-24) |
 | 0008 | Plan model: linear typed operators, SQL null semantics, Merkle plan hashes | Proposed (M1) |
 | 0009 | Lineage: always-on per-step mappings, composed on demand | Proposed (M2) |
 | 0010 | Counterfactuals: exact incremental recomputation, with full re-run as the fallback | Proposed (M3) |
+| 0011 | The browser verifies every snapshot hash on load | Proposed (M4) |
