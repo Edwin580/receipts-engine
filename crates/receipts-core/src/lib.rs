@@ -5,6 +5,7 @@ mod bitmap;
 pub mod canonical_json;
 mod column;
 pub mod hash;
+pub mod ipc;
 mod row_id;
 pub mod time;
 mod types;

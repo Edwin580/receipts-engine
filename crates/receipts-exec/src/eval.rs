@@ -16,7 +16,25 @@ pub(crate) enum Datum {
 }
 
 /// Per-row accessor; `None` is a missing value.
-type Get<'a, T> = Box<dyn Fn(usize) -> Option<T> + 'a>;
+type Get<'a, T> = Box<dyn Fn(usize) -> Option<T> + Send + Sync + 'a>;
+
+/// `(0..n).map(f).collect()`, on several threads with the `parallel`
+/// feature. Order is preserved, so results are identical.
+fn collect_rows<T: Send>(n: usize, f: impl Fn(usize) -> T + Send + Sync) -> Vec<T> {
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        (0..n)
+            .into_par_iter()
+            .with_min_len(1 << 14)
+            .map(f)
+            .collect()
+    }
+    #[cfg(not(feature = "parallel"))]
+    {
+        (0..n).map(f).collect()
+    }
+}
 
 pub(crate) struct Evaluator<'a> {
     pub table: &'a Table,
@@ -270,8 +288,8 @@ pub(crate) fn selection(d: &Datum, n: usize) -> Vec<u32> {
         .collect()
 }
 
-fn bool_col(n: usize, f: impl Fn(usize) -> Option<bool>) -> Datum {
-    let values: Vec<Option<bool>> = (0..n).map(f).collect();
+fn bool_col(n: usize, f: impl Fn(usize) -> Option<bool> + Send + Sync) -> Datum {
+    let values: Vec<Option<bool>> = collect_rows(n, f);
     let data = ColumnData::Bool(Bitmap::from_bools(
         values.iter().map(|v| v.unwrap_or(false)),
     ));
@@ -279,8 +297,8 @@ fn bool_col(n: usize, f: impl Fn(usize) -> Option<bool>) -> Datum {
     Datum::Col(Arc::new(Column::new("", data, validity)))
 }
 
-fn i64_col(n: usize, timestamp: bool, f: impl Fn(usize) -> Option<i64>) -> Datum {
-    let values: Vec<Option<i64>> = (0..n).map(f).collect();
+fn i64_col(n: usize, timestamp: bool, f: impl Fn(usize) -> Option<i64> + Send + Sync) -> Datum {
+    let values: Vec<Option<i64>> = collect_rows(n, f);
     let v: Vec<i64> = values.iter().map(|v| v.unwrap_or(0)).collect();
     let data = if timestamp {
         ColumnData::Timestamp(v)
@@ -291,8 +309,8 @@ fn i64_col(n: usize, timestamp: bool, f: impl Fn(usize) -> Option<i64>) -> Datum
     Datum::Col(Arc::new(Column::new("", data, validity)))
 }
 
-fn f64_col(n: usize, f: impl Fn(usize) -> Option<f64>) -> Datum {
-    let values: Vec<Option<f64>> = (0..n).map(f).collect();
+fn f64_col(n: usize, f: impl Fn(usize) -> Option<f64> + Send + Sync) -> Datum {
+    let values: Vec<Option<f64>> = collect_rows(n, f);
     let data = ColumnData::F64(values.iter().map(|v| v.unwrap_or(0.0)).collect());
     let validity = validity_from(n, |i| values[i].is_some());
     Datum::Col(Arc::new(Column::new("", data, validity)))

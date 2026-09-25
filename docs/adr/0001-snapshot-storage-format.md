@@ -32,3 +32,14 @@ the in-memory layout we want, so they can be copied or viewed directly.
 - Parquet export can be added later for interop. It is not the engine format.
 - The reader in WASM may be a small custom IPC reader instead of `arrow-ipc`,
   depending on binary size. That decision belongs to M4.
+
+## M4 update (2026-09-25)
+- **Reader:** a small custom IPC reader (`receipts-core::ipc`, no
+  dependencies) instead of `arrow-ipc` in WASM. The whole engine is
+  0.78 MB. Tests check that it decodes exactly what `arrow-ipc` writes.
+- **Warm load:** 1.65–1.80 s for 7.1M rows with the threaded build,
+  including re-hashing everything (ADR 0011), so the 2 s budget holds.
+  The single-threaded fallback takes 3.2–3.6 s.
+- **Compression is still open.** It depends on the M5 static host
+  (`Content-Encoding` from the host, or LZ4 decoded in WASM). A cold load
+  of 497 MB uncompressed isn't acceptable over a real network.

@@ -18,6 +18,40 @@ pub mod context {
     pub const DICTIONARY: &str = "receipts snapshot v1 dictionary";
     pub const COLUMN: &str = "receipts snapshot v1 column";
     pub const SNAPSHOT: &str = "receipts snapshot v1 snapshot";
+    pub const CLEANING_LOG: &str = "receipts snapshot v1 cleaning-log";
+    pub const REJECTS: &str = "receipts snapshot v1 rejects";
+}
+
+/// Cleaning-log hash from its rows `(row_index, column, rule_id, raw_value)`:
+/// `n:u32 ‖ (row_index:u32 ‖ column:u16 ‖ str(rule_id) ‖ opt(raw_value))*`
+/// (schema.md §6). The snapshot builder hashes its own structs the same way.
+pub fn cleaning_log_hash<'a>(
+    rows: impl ExactSizeIterator<Item = (u32, u16, &'a str, Option<&'a str>)>,
+) -> ContentHash {
+    let mut h = ContentHasher::new(context::CLEANING_LOG);
+    h.u32(u32::try_from(rows.len()).expect("fewer than 2^32 log rows"));
+    for (row, column, rule, raw) in rows {
+        h.u32(row)
+            .u16(column)
+            .bytes(rule.as_bytes())
+            .opt_bytes(raw.map(str::as_bytes));
+    }
+    h.finish()
+}
+
+/// Rejects hash from rows `(raw_unique_key, rule_id, raw_record)`:
+/// `n:u32 ‖ (opt(raw_unique_key) ‖ str(rule_id) ‖ str(raw_record))*`.
+pub fn rejects_hash<'a>(
+    rows: impl ExactSizeIterator<Item = (Option<&'a str>, &'a str, &'a str)>,
+) -> ContentHash {
+    let mut h = ContentHasher::new(context::REJECTS);
+    h.u32(u32::try_from(rows.len()).expect("fewer than 2^32 rejects"));
+    for (key, rule, record) in rows {
+        h.opt_bytes(key.map(str::as_bytes))
+            .bytes(rule.as_bytes())
+            .bytes(record.as_bytes());
+    }
+    h.finish()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -205,6 +239,13 @@ pub struct ColumnHashes {
 
 /// `name ‖ type_tag:u8 ‖ (dictionary_hash | 32 zero bytes) ‖ n_chunks:u32 ‖ chunk_hash*`.
 pub fn hash_column(col: &Column) -> ColumnHashes {
+    #[cfg(feature = "parallel")]
+    let chunks: Vec<_> = {
+        use rayon::prelude::*;
+        let ranges: Vec<_> = chunk_ranges(col.len()).collect();
+        ranges.into_par_iter().map(|r| chunk_hash(col, r)).collect()
+    };
+    #[cfg(not(feature = "parallel"))]
     let chunks: Vec<_> = chunk_ranges(col.len())
         .map(|r| chunk_hash(col, r))
         .collect();

@@ -222,12 +222,12 @@ re-paginates the records and checks that `snapshot_hash` doesn't change.
 
 - **Q1 (rows vs. budgets):** keep two years. The first live fetch
   (2026-09-24) gave **7,111,809 rows**, 6% above the 6.7M estimate and 42%
-  above the 5M rows the performance budgets assume. From M1 onwards,
-  benchmarks use the real snapshot plus a 5M-row prefix.
-  **Open decision (before M4):** either restate the budgets for ~7.1M rows,
-  or keep them at 5M and narrow the default scope (for example, 2025 only:
-  3,655,040 rows per the API's `count(*)` on 2026-09-24). This isn't
-  needed for M1–M3, which run natively.
+  above the 5M rows the performance budgets assumed. **Decided
+  2026-09-25:** keep the two-year default and restate the budgets for
+  ~7.1M rows from browser measurements. The M4 proposal and results are in
+  `docs/benchmarks/m4.md`. Every budget is met except a full-table sort in
+  the single-threaded fallback. A 2025-only snapshot (3,655,040 rows)
+  remains an option if a slower target device needs it.
 - **Q2 (app token):** `fetch` sends `X-App-Token` if `SOCRATA_APP_TOKEN` is
   set. The token is never written anywhere.
 - **Q3 (keep raw pages):** superseded by the fetch/build split (ADR 0006).

@@ -10,8 +10,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 /// Row comparator for one column: missing values are smallest.
-pub(crate) fn row_cmp(col: &Column) -> Box<dyn Fn(usize, usize) -> Ordering + '_> {
-    let values: Box<dyn Fn(usize, usize) -> Ordering + '_> = match &col.data {
+pub(crate) fn row_cmp(col: &Column) -> Box<dyn Fn(usize, usize) -> Ordering + Send + Sync + '_> {
+    let values: Box<dyn Fn(usize, usize) -> Ordering + Send + Sync + '_> = match &col.data {
         ColumnData::I64(v) | ColumnData::Timestamp(v) => Box::new(move |a, b| v[a].cmp(&v[b])),
         ColumnData::F64(v) => Box::new(move |a, b| cmp_f64(v[a], v[b])),
         ColumnData::Bool(v) => Box::new(move |a, b| v.get(a).cmp(&v.get(b))),
@@ -32,7 +32,14 @@ pub(crate) fn row_cmp(col: &Column) -> Box<dyn Fn(usize, usize) -> Ordering + '_
 pub(crate) fn sort_permutation(n: usize, keys: &[(&Column, bool)]) -> Vec<u32> {
     let cmps: Vec<_> = keys.iter().map(|(c, desc)| (row_cmp(c), *desc)).collect();
     let mut perm: Vec<u32> = (0..n as u32).collect();
-    perm.sort_by(|&a, &b| {
+    // Both sorts are stable, so the permutation is the same either way.
+    #[cfg(feature = "parallel")]
+    use rayon::slice::ParallelSliceMut;
+    #[cfg(feature = "parallel")]
+    let sort = |p: &mut [u32], f: &(dyn Fn(&u32, &u32) -> Ordering + Sync)| p.par_sort_by(f);
+    #[cfg(not(feature = "parallel"))]
+    let sort = |p: &mut [u32], f: &(dyn Fn(&u32, &u32) -> Ordering + Sync)| p.sort_by(f);
+    sort(&mut perm, &|&a, &b| {
         for (cmp, desc) in &cmps {
             let o = cmp(a as usize, b as usize);
             if o != Ordering::Equal {

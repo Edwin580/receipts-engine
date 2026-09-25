@@ -28,6 +28,37 @@ impl Bitmap {
         bitmap
     }
 
+    /// The first `len` bits of `bytes` (LSB-first); padding bits are
+    /// cleared.
+    ///
+    /// # Panics
+    /// If `bytes` holds fewer than `len` bits.
+    pub fn from_bytes(bytes: &[u8], len: usize) -> Self {
+        let n = len.div_ceil(8);
+        let mut bytes = bytes[..n].to_vec();
+        if !len.is_multiple_of(8) {
+            bytes[n - 1] &= (1u8 << (len % 8)) - 1;
+        }
+        Self { bytes, len }
+    }
+
+    /// `len` set bits.
+    pub fn ones(len: usize) -> Self {
+        Self::from_bytes(&vec![0xFF; len.div_ceil(8)], len)
+    }
+
+    /// Appends `other`'s bits; byte-wise when `self` ends on a byte.
+    pub fn extend(&mut self, other: &Bitmap) {
+        if self.len.is_multiple_of(8) {
+            self.bytes.extend_from_slice(&other.bytes);
+            self.len += other.len;
+        } else {
+            for bit in other.iter() {
+                self.push(bit);
+            }
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.len
     }
@@ -87,6 +118,23 @@ mod tests {
         assert_eq!(b.count_zeros(), 5);
         assert!(b.get(8));
         assert!(!b.get(7));
+    }
+
+    #[test]
+    fn from_bytes_and_extend() {
+        let a = Bitmap::from_bytes(&[0xFF, 0xFF], 11);
+        assert_eq!(a.as_bytes(), &[0xFF, 0b0000_0111]);
+        let mut b = Bitmap::ones(8);
+        b.extend(&Bitmap::from_bools([false, true, true]));
+        assert_eq!(
+            b,
+            Bitmap::from_bools([
+                true, true, true, true, true, true, true, true, false, true, true
+            ])
+        );
+        let mut c = Bitmap::from_bools([true]);
+        c.extend(&Bitmap::from_bools([false, true]));
+        assert_eq!(c, Bitmap::from_bools([true, false, true]));
     }
 
     #[test]
