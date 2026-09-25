@@ -128,6 +128,13 @@ impl JsEngine {
             .map_err(js_err)
     }
 
+    /// Snapshot rows behind a plan's whole output (e.g. a known-issue
+    /// filter), for what-if exclusions.
+    #[wasm_bindgen(js_name = matchingRows)]
+    pub fn matching_rows(&self, plan: &str) -> Result<Vec<u32>, JsError> {
+        self.inner.matching_rows(plan).map_err(js_err)
+    }
+
     #[wasm_bindgen(js_name = dropExecution)]
     pub fn drop_execution(&mut self, execution: u32) -> bool {
         self.inner.drop_execution(execution)

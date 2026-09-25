@@ -373,6 +373,24 @@ impl Engine {
         }))
     }
 
+    /// Every snapshot row behind a plan's output: for example, the rows a
+    /// known-issue filter selects, to exclude them in a what-if. The plan
+    /// runs without being kept.
+    pub fn matching_rows(&self, plan_json: &str) -> Result<Vec<u32>, String> {
+        let plan = self.parse_valid(plan_json).map_err(|e| {
+            e.get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("invalid plan")
+                .to_string()
+        })?;
+        let e = execute(&plan, self).map_err(|e| e.to_string())?;
+        let all: Vec<u32> = (0..e.output().len() as u32).collect();
+        Ok(e.lineage
+            .backward(e.output.index(), &all)
+            .source_rows()
+            .to_vec())
+    }
+
     pub fn drop_execution(&mut self, id: u32) -> bool {
         self.executions.remove(&id).is_some()
     }

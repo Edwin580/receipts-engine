@@ -178,6 +178,19 @@ fn runs_traces_and_excludes() {
     assert_eq!(c["exact"], true);
     assert!(e.contributions(id, 0, "borough", 3).is_err());
 
+    // Rows behind a filter plan, e.g. to exclude them in a what-if.
+    let midnight = json!({"format": "receipts-plan/1", "nodes": [
+        {"op": "scan", "snapshot": hash},
+        {"op": "filter", "input": 0, "predicate": {"call": "eq", "args": [
+            {"column": "created_date"},
+            {"call": "date_trunc", "unit": "day", "args": [{"column": "created_date"}]}]}}
+    ], "output": 1})
+    .to_string();
+    let rows_at_midnight = e.matching_rows(&midnight).unwrap();
+    assert!(!rows_at_midnight.is_empty());
+    assert!(rows_at_midnight.windows(2).all(|w| w[0] < w[1]));
+    assert!(e.matching_rows("{}").is_err());
+
     // Dropping the base breaks derived exclusions with a clear message.
     assert!(e.drop_execution(id));
     assert!(e.exclude(a_id, &[0]).unwrap_err().contains("dropped"));
