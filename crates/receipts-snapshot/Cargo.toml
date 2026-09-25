@@ -1,0 +1,31 @@
+[package]
+name = "receipts-snapshot"
+description = "Offline CLI: Socrata -> cleaned Arrow IPC snapshot + manifest"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "receipts-snapshot"
+path = "src/main.rs"
+
+[dependencies]
+receipts-core.workspace = true
+anyhow.workspace = true
+arrow-array.workspace = true
+arrow-buffer.workspace = true
+arrow-ipc.workspace = true
+arrow-schema.workspace = true
+blake3.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

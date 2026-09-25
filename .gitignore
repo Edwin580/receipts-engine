@@ -1,0 +1,4 @@
+/target
+# Snapshot outputs are published to static hosting, never committed.
+/snapshots/
+*.arrow
