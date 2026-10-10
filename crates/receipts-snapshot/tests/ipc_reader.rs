@@ -192,10 +192,18 @@ proptest! {
             let i = i.index(bytes.len());
             bytes[i] ^= b | 1;
         }
-        if let Ok(f) = read_file(&bytes) {
-            for i in 0..f.fields.len() {
-                let _ = f.core_column(i);
+        // Errors reach users as sentences (docs/engine/wasm-api.md), so no
+        // Debug-formatted library error may leak through.
+        let plain = |e: &str| !e.contains("Error(") && !e.contains(" { ");
+        match read_file(&bytes) {
+            Ok(f) => {
+                for i in 0..f.fields.len() {
+                    if let Err(e) = f.core_column(i) {
+                        prop_assert!(plain(&e), "{e}");
+                    }
+                }
             }
+            Err(e) => prop_assert!(plain(&e), "{e}"),
         }
         let truncated = &file[..cut.index(file.len())];
         prop_assert!(read_file(truncated).is_err());

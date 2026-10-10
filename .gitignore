@@ -5,3 +5,7 @@
 
 # WASM packages are build outputs (tools/wasm/build.sh).
 /web/pkg/
+/web/site/pkg/
+
+# The demo page's one-month snapshot is small and published with the page.
+!/web/site/data/*.arrow

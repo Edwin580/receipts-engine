@@ -37,8 +37,10 @@ jobs:
           rustup toolchain install "$NIGHTLY" --profile minimal -c rust-src -t wasm32-unknown-unknown
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked
-      - name: Build both WASM packages
+      - name: Build both WASM packages and the demo page's copy
         run: tools/wasm/build.sh
+      - name: Demo page tests (plans, formatting, the real demo snapshot)
+        run: node --test web/site/test/*.test.mjs
       - name: Native parity and browser runs on a synthetic snapshot
         run: |
           cargo build --release -p receipts-snapshot -p receipts-wasm --bin receipts-snapshot --bin receipts-engine

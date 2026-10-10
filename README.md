@@ -1,15 +1,60 @@
 # Receipts
 
-Row-level provenance for public data. Click a number derived from NYC open
-data and see the source rows that produced it, every transform in between,
-and what the number becomes if you exclude any of those rows. The engine is
-custom Rust compiled to WASM and runs entirely in the browser.
+Click a number computed from New York City 311 data and see the requests it
+came from, every step in between, and what the number becomes if you leave
+some of them out. The query engine is my own, written in Rust and compiled
+to WebAssembly, and it runs in your browser.
 
-**Status:** M0 (snapshot pipeline) implemented and verified against the
+**Try it: https://edwin580.github.io/receipts-engine/**
+
+The demo loads one month of real 311 requests (July 2025, 315,883 rows,
+10.7 MB) so it stays quick on a phone. Nothing to install, no account.
+On the page you can:
+
+- change the question (mean or median hours to close, or a count, for any
+  common complaint type, by borough, agency or channel) and watch the plan
+  re-run;
+- click any number to trace it back to its source rows, with each step's
+  row count and a link from every request to the same record in the city's
+  API;
+- drag a slider to leave out the requests that move the number most, and
+  see the exact new value;
+- flip bits in the data file and watch the engine refuse to load it.
+
+## Run the demo locally
+
+```
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.128 --locked
+tools/wasm/build.sh site               # builds web/site/pkg
+python3 -m http.server -d web/site 8000   # then open http://localhost:8000
+node --test web/site/test/*.test.mjs   # page logic and the real snapshot
+```
+
+The page is static files: `web/site/index.html`, `app.js` (talks to the
+engine), `lib.js` (builds plans from the controls; no DOM), `style.css`,
+the ET Book fonts, and the demo snapshot in `web/site/data/`. It has no
+JavaScript dependencies and no bundler. `.github/workflows/pages.yml`
+builds the WASM package and publishes `web/site` on every push to `main`.
+
+The demo snapshot was made with the CLI below:
+
+```
+receipts-snapshot fetch --out raw/jul2025 --from 2025-07-01 --to 2025-08-01
+receipts-snapshot build --raw raw/jul2025 --out snapshots/jul2025
+```
+
+The page uses the single threaded build because GitHub Pages can't send the
+COOP/COEP headers that WASM threads need.
+
+## Status
+
+M0 (snapshot pipeline) implemented and verified against the
 live Socrata API on 2026-09-24: 7,111,809 rows, snapshot `3b42e46a…` (see
 `docs/benchmarks/m0.md`). M1 (plans), M2 (lineage) and M3 (counterfactuals) merged. M4 (the engine
 in the browser: WASM, verify-on-load, threads) implemented, awaiting
-review (see `docs/engine/wasm-api.md`, `docs/benchmarks/m4.md`).
+review (see `docs/engine/wasm-api.md`, `docs/benchmarks/m4.md`). The demo
+page in `web/site` stands in for the M5 frontend.
 
 ## Snapshot CLI
 
@@ -71,6 +116,7 @@ crates/
   receipts-snapshot/  offline snapshot CLI                         (M0)
   receipts-bench/     benchmarks on real snapshots                 (M1)
 web/
+  site/               the demo page (static; see above)
   engine-test/        browser benchmark, parity test, dev server   (M4)
   pkg/                WASM builds (generated, not committed)
                       React + TS frontend                          (M5)
@@ -119,4 +165,5 @@ oracle.
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+node --test web/site/test/*.test.mjs   # after tools/wasm/build.sh site
 ```

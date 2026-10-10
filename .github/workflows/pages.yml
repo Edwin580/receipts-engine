@@ -1,0 +1,41 @@
+# Publishes the demo page (web/site) to GitHub Pages: builds the single
+# threaded WASM package, runs the page's tests, uploads web/site.
+name: pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      WASM_BINDGEN: "0.2.128"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain with the wasm target
+        run: rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" --profile minimal -t wasm32-unknown-unknown
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked
+      - run: tools/wasm/build.sh site
+      - run: node --test web/site/test/*.test.mjs
+      - name: Leave tests out of the published site
+        run: rm -rf web/site/test
+      - uses: actions/upload-pages-artifact@v4.0.0
+        with:
+          path: web/site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4.0.5

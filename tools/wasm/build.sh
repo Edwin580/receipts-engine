@@ -3,6 +3,7 @@
 #   web/pkg/st  single-threaded, stable Rust (works everywhere)
 #   web/pkg/mt  multi-threaded, pinned nightly + build-std (needs
 #               cross-origin isolation: COOP/COEP headers)
+#   web/site/pkg  the st package again, for the demo page (`build.sh site`)
 # Requires: rustup targets/toolchains below and wasm-bindgen-cli matching
 # the wasm-bindgen version pinned in Cargo.toml.
 set -euo pipefail
@@ -17,7 +18,7 @@ fi
 
 what=${1:-all}
 
-if [ "$what" = all ] || [ "$what" = st ]; then
+if [ "$what" = all ] || [ "$what" = st ] || [ "$what" = site ]; then
   cargo build --release --target wasm32-unknown-unknown -p receipts-wasm
   wasm-bindgen --target web --out-dir web/pkg/st \
     target/wasm32-unknown-unknown/release/receipts_wasm.wasm
@@ -32,5 +33,10 @@ if [ "$what" = all ] || [ "$what" = mt ]; then
       -Z build-std=panic_abort,std
   wasm-bindgen --target web --out-dir web/pkg/mt \
     target/wasm-mt/wasm32-unknown-unknown/release/receipts_wasm.wasm
+fi
+if [ "$what" = all ] || [ "$what" = site ]; then
+  rm -rf web/site/pkg
+  mkdir -p web/site/pkg
+  cp web/pkg/st/receipts_wasm.js web/pkg/st/receipts_wasm_bg.wasm web/site/pkg/
 fi
 ls -la web/pkg/*/receipts_wasm_bg.wasm

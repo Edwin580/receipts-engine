@@ -449,10 +449,11 @@ fn decompress(raw: &[u8]) -> Result<Vec<u8>> {
     lz4_flex::frame::FrameDecoder::new(&raw[8..])
         .take(len as u64 + 1)
         .read_to_end(&mut out)
-        .map_err(|e| format!("LZ4 frame: {e}"))?;
+        // lz4_flex's errors are Debug-formatted enums; say what happened instead.
+        .map_err(|_| "a compressed buffer is corrupt: its LZ4 frame doesn't decode".to_string())?;
     if out.len() != len {
         return Err(format!(
-            "LZ4 buffer decoded to {} bytes, expected {len}",
+            "a compressed buffer decoded to {} bytes, but its header says {len}",
             out.len()
         ));
     }
