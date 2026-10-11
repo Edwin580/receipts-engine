@@ -1,4 +1,4 @@
-// The demo's plans against the real engine and the published demo snapshot.
+// The page's plans against the real engine and the published snapshot.
 // Needs web/site/pkg (tools/wasm/build.sh site).
 //   node --test web/site/test/*.test.mjs
 import { test } from "node:test";
@@ -6,7 +6,9 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildPlan, topTypesPlan, METRICS, GROUPS, findGroup, flipBit, hoursBetween } from "../lib.js";
+import {
+  BOROUGHS, waitPlan, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan, ORDERS, parseDistrict, hoursBetween,
+} from "../lib.js";
 
 const site = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = join(site, "pkg");
@@ -21,85 +23,138 @@ const files = [data("manifest.json").toString(), data("data.arrow"), data("clean
 const engine = new Engine();
 const report = JSON.parse(engine.loadSnapshot(...files));
 const S = report.snapshot_hash;
-const run = (plan) => JSON.parse(engine.run(JSON.stringify(plan)));
+const run = (plan) => {
+  const r = JSON.parse(engine.run(JSON.stringify(plan)));
+  assert.ok(r.ok, r.error);
+  return r;
+};
+const rows = (plan) => {
+  const r = run(plan);
+  engine.dropExecution(r.execution);
+  return r.output.rows;
+};
+const median = (xs) => {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
 
-test("the demo snapshot verifies and matches its manifest", () => {
+test("the snapshot verifies and matches its manifest", () => {
   const m = JSON.parse(files[0]);
   assert.equal(S, m.snapshot_hash);
   assert.equal(report.rows, m.row_count);
 });
 
-const types = run(topTypesPlan(S, 15)).output.rows.map((r) => r[0]);
+const types = rows(topTypesPlan(S, 30)).map((r) => r[0]);
+const districts = rows(districtsPlan(S)).map((r) => r[0]).filter(parseDistrict);
 
-test("the type menu lists the most common types, most first", () => {
-  const r = run(topTypesPlan(S, 15));
-  assert.equal(r.output.rows.length, 15);
-  for (let i = 1; i < 15; i++) assert.ok(r.output.rows[i - 1][1] >= r.output.rows[i][1]);
+test("the menus: 30 types most first, and every borough has districts", () => {
+  const t = rows(topTypesPlan(S, 30));
+  assert.equal(t.length, 30);
+  for (let i = 1; i < t.length; i++) assert.ok(t[i - 1][1] >= t[i][1]);
+  for (const b of BOROUGHS) assert.ok(districts.some((d) => parseDistrict(d).borough === b), b);
 });
 
-test("every combination of controls gives a valid plan whose groups add up", () => {
-  for (const type of [null, ...types.slice(0, 4)]) {
-    for (const groupBy of Object.keys(GROUPS)) {
-      for (const metric of Object.keys(METRICS)) {
-        for (const dropBackwards of [true, false]) {
-          const q = { type, groupBy, metric, dropBackwards };
-          const r = run(buildPlan(S, q));
-          assert.ok(r.ok, `${JSON.stringify(q)}: ${r.error}`);
-          const agg = r.steps.length - 2;
-          const total = r.output.rows.reduce((a, row) => a + row[1], 0);
-          assert.equal(total, r.steps[agg - 1].rows, JSON.stringify(q));
-          engine.dropExecution(r.execution);
-        }
-      }
+test("every question runs, and the counts are consistent", () => {
+  const areas = [
+    { kind: "city" },
+    ...BOROUGHS.map((value) => ({ kind: "borough", value })),
+    ...districts.slice(0, 10).map((value) => ({ kind: "district", value })),
+    { kind: "zip", value: "10451" },
+    { kind: "zip", value: "00000" },
+  ];
+  for (const type of types.slice(0, 6)) {
+    for (const area of areas) {
+      const q = { type, area };
+      const [closed, med] = rows(waitPlan(S, q))[0];
+      const [filed, withDate] = rows(countsPlan(S, q))[0];
+      assert.ok(filed >= withDate && withDate >= closed, JSON.stringify({ q, filed, withDate, closed }));
+      assert.equal(med === null, closed === 0);
+      if (med !== null) assert.ok(med >= 0);
     }
   }
 });
 
-test("a traced mean equals the mean of its receipts", () => {
-  const r = run(buildPlan(S, { type: types[1], groupBy: "borough", metric: "mean", dropBackwards: true }));
+test("a district's median equals the median of the complaints it traces back to", () => {
+  const q = { type: "Noise - Residential", area: { kind: "district", value: "04 BRONX" } };
+  const r = run(waitPlan(S, q));
+  const [closed, med] = r.output.rows[0];
   const ids = engine.traceBackRows(r.execution, 0);
-  assert.equal(ids.length, r.output.rows[0][1]);
+  assert.equal(ids.length, closed);
   const recs = JSON.parse(engine.sourceRecords(S, ids));
   const c = (n) => recs.columns.indexOf(n);
+  assert.ok(recs.rows.every((row) => row[c("community_board")] === "04 BRONX" && row[c("complaint_type")] === q.type));
   const hours = recs.rows.map((row) => hoursBetween(row[c("created_date")], row[c("closed_date")]));
-  assert.ok(recs.rows.every((row) => row[c("borough")] === r.output.rows[0][0] && row[c("complaint_type")] === types[1]));
-  const mean = hours.reduce((a, h) => a + h, 0) / hours.length;
-  assert.ok(Math.abs(mean - r.output.rows[0][2]) < 1e-9, `${mean} vs ${r.output.rows[0][2]}`);
+  assert.ok(hours.every((h) => h >= 0));
+  assert.ok(Math.abs(median(hours) - med) < 1e-9, `${median(hours)} vs ${med}`);
+  engine.dropExecution(r.execution);
 });
 
-test("leaving out the top movers matches a plan that filters them out", () => {
-  const q = { type: types[0], groupBy: "borough", metric: "median", dropBackwards: true };
-  const r = run(buildPlan(S, q));
-  const i = 1;
-  const key = r.output.rows[i][0];
-  const mv = JSON.parse(engine.contributions(r.execution, i, "median_hours", 10));
-  const rows = new Uint32Array(mv.top.slice(0, 5).map((t) => t.source_row));
-  const cf = JSON.parse(engine.exclude(r.execution, rows));
-  const after = cf.output.rows[findGroup(cf.output.rows, key)];
-
-  // The same exclusion as a filter on unique_key, run from scratch.
-  const recs = JSON.parse(engine.sourceRecords(S, rows));
-  const keys = recs.rows.map((row) => ({ i64: String(row[0]) }));
-  const plan = buildPlan(S, q);
-  plan.nodes.splice(1, 0, { op: "filter", input: 0, predicate: { call: "not", args: [{ call: "in", args: [{ column: "unique_key" }], values: keys }] } });
-  plan.nodes.forEach((n, j) => { if (j > 1) n.input = j - 1; });
-  plan.output += 1;
-  const fresh = run(plan);
-  assert.ok(fresh.ok, fresh.error);
-  assert.deepEqual(after, fresh.output.rows[findGroup(fresh.output.rows, key)]);
+test("the comparison table adds up to the borough", () => {
+  for (const type of types.slice(0, 3)) {
+    for (const borough of BOROUGHS) {
+      const total = rows(comparePlan(S, { type, borough })).reduce((a, r) => a + r[1], 0);
+      assert.equal(total, rows(waitPlan(S, { type, area: { kind: "borough", value: borough } }))[0][0], `${type} ${borough}`);
+    }
+    const byBorough = rows(comparePlan(S, { type, borough: null }));
+    for (let i = 1; i < byBorough.length; i++) assert.ok(byBorough[i - 1][2] >= byBorough[i][2]);
+  }
 });
 
-test("a flipped bit is refused with a sentence, never a crash", () => {
+test("complaint lists are in order and match the answer's complaints", () => {
+  const q = { type: "Noise - Residential", area: { kind: "district", value: "04 BRONX" } };
+  const [closed] = rows(waitPlan(S, q))[0];
+  for (const order of Object.keys(ORDERS)) {
+    const r = run(listPlan(S, q, order, 400));
+    const col = Object.fromEntries(r.output.columns.map((c, i) => [c.name, i]));
+    const list = r.output.rows;
+    assert.equal(r.output.total_rows, Math.min(400, closed));
+    assert.equal(list.length, r.output.total_rows);
+    assert.ok(list.every((row) => row[col.community_board] === "04 BRONX"));
+    const key = order === "recent" ? (row) => -Date.parse(row[col.created_date].slice(0, 23) + "Z")
+      : order === "slowest" ? (row) => -row[col.hours_to_close] : (row) => row[col.hours_to_close];
+    for (let i = 1; i < list.length; i++) assert.ok(key(list[i - 1]) <= key(list[i]), `${order} row ${i}`);
+    engine.dropExecution(r.execution);
+  }
+});
+
+test("leaving out one complaint gives what a fresh query without it gives", () => {
+  const q = { type: types[0], area: { kind: "borough", value: "QUEENS" } };
+  const r = run(waitPlan(S, q));
+  const c = JSON.parse(engine.contributions(r.execution, 0, "median_hours", 3));
+  assert.equal(c.exact, true);
+  for (const t of c.top) {
+    const key = JSON.parse(engine.sourceRecords(S, new Uint32Array([t.source_row]))).rows[0][0];
+    const plan = waitPlan(S, q);
+    plan.nodes.splice(1, 0, { op: "filter", input: 0, predicate: { call: "ne", args: [{ column: "unique_key" }, { literal: { i64: String(key) } }] } });
+    plan.nodes.forEach((n, j) => { if (j > 1) n.input = j - 1; });
+    plan.output += 1;
+    assert.equal(rows(plan)[0][1], t.without);
+  }
+  engine.dropExecution(r.execution);
+});
+
+// The fingerprint covers the values, not the file's bytes: a change that
+// alters no value (alignment padding, say) loads and re-derives the same
+// fingerprint. Anything else is refused with a sentence, never a crash.
+test("a changed byte is refused, or changed no value", () => {
   const n = files[1].length;
-  for (const off of [0, 1000, Math.floor(n / 2), n - 1]) {
+  let refused = 0;
+  const offsets = [0, n - 1, ...Array.from({ length: 40 }, (_, i) => Math.floor((n * (i + 0.5)) / 40))];
+  for (const off of offsets) {
     const e = new Engine();
+    const bad = new Uint8Array(files[1]);
+    bad[off] ^= 1;
     try {
-      e.loadSnapshot(files[0], flipBit(files[1], off), files[2], files[3]);
+      const r = JSON.parse(e.loadSnapshot(files[0], bad, files[2], files[3]));
+      assert.equal(r.snapshot_hash, S, `offset ${off}`);
     } catch (err) {
+      if (err.code === "ERR_ASSERTION") throw err;
       assert.match(err.message, /^[\w.]+: /, `offset ${off}: ${err.message}`);
-      assert.doesNotMatch(err.message, /Error\(| \{ /);
+      refused++;
     } finally {
       e.free();
     }
   }
+  assert.ok(refused >= offsets.length - 4, `only ${refused} of ${offsets.length} refused`);
 });
