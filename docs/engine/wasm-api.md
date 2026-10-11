@@ -50,6 +50,12 @@ engine.traceBack(run.execution, row);                  // {source, ms, path: [{s
 const ids = engine.traceBackRows(run.execution, row);  // Uint32Array of snapshot rows
 engine.sourceRecords(report.snapshot_hash, ids.subarray(0, 20));  // the receipts
 
+engine.traceForward(run.execution, snapshotRow);      // where one row goes, and why it stops
+// {source_row, reaches_output, output_row, path: [{step, row}],
+//  dropped: null | {step, sentence, reason}}
+// reason: {kind: "filter", value: false | null}   (null: couldn't be decided, a value is missing)
+//       | {kind: "limit", position, count} | {kind: "excluded"} | {kind: "other"}
+
 const cf = JSON.parse(engine.exclude(run.execution, ids.subarray(0, 1)));
 // like run, plus {method: {kind: unchanged|incremental|rerun, ...}, excluded}
 // Excluding from a counterfactual composes: its base execution minus the union.

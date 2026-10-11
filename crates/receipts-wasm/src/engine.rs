@@ -7,8 +7,10 @@ use crate::verify::{VerifiedSnapshot, verify};
 use receipts_cf::{CfValue, Method, contributions, exclude};
 use receipts_core::time::format_naive_timestamp;
 use receipts_core::{Column, ColumnData, ContentHash, SourceId};
-use receipts_exec::{Execution, SourceProvider, Table, execute};
-use receipts_plan::{Catalog, Field, NodeId, Schema, SourceInfo, ValidPlan, describe, validate};
+use receipts_exec::{Execution, SourceProvider, Table, execute, predicate_on_row};
+use receipts_plan::{
+    Catalog, Field, NodeId, Op, Schema, SourceInfo, ValidPlan, describe, validate,
+};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -233,6 +235,79 @@ impl Engine {
         self.executions
             .get(&id)
             .ok_or_else(|| format!("no execution {id}"))
+    }
+
+    /// Where one snapshot row goes in an execution: its row at every step
+    /// from the scan to the output, and, if it doesn't reach the output, the
+    /// step that dropped it and why. Steps that combine rows (aggregates)
+    /// report the group the row joined.
+    pub fn trace_forward(&self, id: u32, source_row: u32) -> Result<Value, String> {
+        let live = self.live(id)?;
+        let (plan, e) = (&live.plan, &live.execution);
+        let nodes = plan.nodes();
+        // The chain of steps from the output back to its scan.
+        let mut chain = vec![e.output.index()];
+        while let Some(input) = nodes[*chain.last().unwrap()].input() {
+            chain.push(input.index());
+        }
+        chain.reverse();
+        let scan = chain[0];
+        let Op::Scan { snapshot } = &nodes[scan] else {
+            unreachable!("validated: every chain starts at a scan")
+        };
+        let len = self
+            .snapshots
+            .get(snapshot)
+            .ok_or("that execution's snapshot is no longer loaded")?
+            .table
+            .len();
+        if source_row as usize >= len {
+            return Err(format!(
+                "row {source_row} is past the snapshot's {len} rows"
+            ));
+        }
+        let sentences = describe(plan);
+        if live.excluded.contains(&source_row) {
+            // Incremental what-ifs reuse the base scan, so say this directly.
+            return Ok(json!({
+                "source_row": source_row,
+                "reaches_output": false,
+                "output_row": Value::Null,
+                "path": [],
+                "dropped": { "step": scan, "sentence": sentences[scan], "reason": { "kind": "excluded" } },
+            }));
+        }
+        let mut path = Vec::new();
+        let mut dropped = Value::Null;
+        let mut previous: Option<u32> = None;
+        for &step in &chain {
+            let rows = e.lineage.forward(scan, &[source_row], step);
+            let Some(&row) = rows.first() else {
+                let reason = match (&nodes[step], previous) {
+                    (Op::Scan { .. }, _) => json!({ "kind": "excluded" }),
+                    (Op::Filter { predicate, .. }, Some(at)) => {
+                        let input = nodes[step].input().expect("filters read a step").index();
+                        let value = predicate_on_row(&e.tables[input], predicate, at)?;
+                        json!({ "kind": "filter", "value": value })
+                    }
+                    (Op::Limit { count, .. }, Some(at)) => {
+                        json!({ "kind": "limit", "position": at, "count": count.to_string() })
+                    }
+                    _ => json!({ "kind": "other" }),
+                };
+                dropped = json!({ "step": step, "sentence": sentences[step], "reason": reason });
+                break;
+            };
+            path.push(json!({ "step": step, "row": row }));
+            previous = Some(row);
+        }
+        Ok(json!({
+            "source_row": source_row,
+            "reaches_output": dropped.is_null(),
+            "output_row": if dropped.is_null() { json!(previous) } else { Value::Null },
+            "path": path,
+            "dropped": dropped,
+        }))
     }
 
     /// Output rows `[from, from + count)`.
