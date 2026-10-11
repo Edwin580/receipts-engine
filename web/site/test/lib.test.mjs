@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  waitPlan, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan, ORDERS, keyPlan, fasterPlan, questionFor, whyNotCounted,
+  waitPlan, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan, ORDERS, keyPlan, fasterPlan, questionFor, whyNotCounted, toSearch, fromSearch,
   parseDistrict, districtName, boroughName, areaName, areaKey, parseAreaKey, rankOf, ordinal,
   fmtInt, fmtDuration, fmtWhen, hoursBetween, periodName, typeName, shortHash,
 } from "../lib.js";
@@ -139,4 +139,18 @@ test("looking up a complaint: number checks, its question, and why it isn't coun
   assert.equal(whyNotCounted(plan, filter(at("ge"), null)), "backwards");
   assert.equal(whyNotCounted(plan, filter(1, false)), "elsewhere");
   assert.equal(whyNotCounted(plan, { step: 0, sentence: "", reason: { kind: "excluded" } }), "other");
+});
+
+test("links: the question round-trips through the URL, bad parts fall back", () => {
+  for (const area of AREAS) {
+    for (const complaint of [null, "65671892"]) {
+      const q = { type: "HEAT/HOT WATER", area };
+      assert.deepEqual(fromSearch(toSearch(q, complaint)), { ...q, complaint });
+    }
+  }
+  assert.equal(toSearch({ type: "Rodent", area: { kind: "city" } }), "?type=Rodent");
+  assert.equal(toSearch({ type: null, area: { kind: "city" } }), "");
+  assert.deepEqual(fromSearch(""), { type: null, area: { kind: "city" }, complaint: null });
+  assert.deepEqual(fromSearch("?type=&area=zip:12&complaint=12x"), { type: null, area: { kind: "city" }, complaint: null });
+  assert.deepEqual(fromSearch("?area=borough%3AQUEENS").area, { kind: "borough", value: "QUEENS" });
 });
