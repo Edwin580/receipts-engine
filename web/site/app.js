@@ -178,7 +178,8 @@ function answer() {
     $("headline").replaceChildren(
       el("span", { class: "lead" }, `${what} complaints in ${where}, ${state.period}`),
       "Half were closed within ", el("b", {}, fmtDuration(median)), ".",
-      closed >= 10 ? el("span", { class: "tail" }, "9 in 10 were closed within ", el("b", {}, fmtDuration(p90)), ".") : null,
+      // replaceChildren would print a null, so leave the line out instead.
+      ...(closed >= 10 ? [el("span", { class: "tail" }, "9 in 10 were closed within ", el("b", {}, fmtDuration(p90)), ".")] : []),
     );
   }
 
