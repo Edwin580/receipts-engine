@@ -396,6 +396,16 @@ fn run_reference(plan: &Plan, source: &RTable) -> Result<RTable, String> {
                                 }
                                 best.cloned().unwrap_or(V::Null)
                             }
+                            AggFunc::Percentile(p) => {
+                                // The first value, in sorted order, with at
+                                // least p% of the values at or below it.
+                                let mut sorted: Vec<&V> = vals.iter().collect();
+                                sorted.sort_by(|a, b| vcmp(a, b));
+                                let n = sorted.len();
+                                (0..n)
+                                    .find(|&i| (i + 1) * 100 >= p as usize * n)
+                                    .map_or(V::Null, |i| sorted[i].clone())
+                            }
                         });
                     }
                     rows.push(row);
@@ -741,6 +751,8 @@ fn arb_agg() -> impl Strategy<Value = AggStep> {
             sortable()
         )
             .prop_map(|(f, c)| (f, Some(c))),
+        (1u8..=99, prop::sample::select(vec!["k", "x", "f", "t"]))
+            .prop_map(|(p, c)| (AggFunc::Percentile(p), Some(c))),
     ];
     (
         prop::sample::subsequence(vec!["s", "b", "x", "k", "f", "u"], 0..3),

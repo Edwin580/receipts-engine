@@ -403,7 +403,40 @@ pub(crate) fn aggregate(
             }
             gather_opt(col, best.iter().copied(), g)
         }
+        AggFunc::Percentile(p) => {
+            // Bucket row numbers by group, sort each bucket by value (stable,
+            // so ties keep row order), and take the value at the rank.
+            let cmp = row_cmp(col);
+            let mut start = vec![0usize; g + 1];
+            for i in valid_rows() {
+                start[ids[i] as usize + 1] += 1;
+            }
+            for k in 0..g {
+                start[k + 1] += start[k];
+            }
+            let mut fill = start.clone();
+            let mut rows = vec![0u32; start[g]];
+            for i in valid_rows() {
+                let k = ids[i] as usize;
+                rows[fill[k]] = i as u32;
+                fill[k] += 1;
+            }
+            let picked: Vec<Option<u32>> = (0..g)
+                .map(|k| {
+                    let bucket = &mut rows[start[k]..start[k + 1]];
+                    bucket.sort_by(|&a, &b| cmp(a as usize, b as usize));
+                    percentile_rank(bucket.len(), p).map(|r| bucket[r])
+                })
+                .collect();
+            gather_opt(col, picked.iter().copied(), g)
+        }
     })
+}
+
+/// Index into `n` sorted values of their nearest-rank `p`th percentile:
+/// the smallest value at least `p` percent of them are at or below.
+pub fn percentile_rank(n: usize, p: u8) -> Option<usize> {
+    (n > 0).then(|| (n * p as usize).div_ceil(100).max(1) - 1)
 }
 
 /// The middle value, or the mean of the two middle values.

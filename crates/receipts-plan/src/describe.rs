@@ -61,6 +61,10 @@ pub fn describe_node(plan: &ValidPlan, node: NodeId) -> String {
                         AggFunc::Median => format!("the median of {c}"),
                         AggFunc::Min => format!("the {} {c}", extreme(input(), c, false)),
                         AggFunc::Max => format!("the {} {c}", extreme(input(), c, true)),
+                        AggFunc::Percentile(p) => format!(
+                            "the {} percentile of {c} (the smallest value at least {p}% of rows are at or below)",
+                            ordinal(p)
+                        ),
                     };
                     format!("{what} (as {})", a.name)
                 })
@@ -162,4 +166,16 @@ fn thousands(n: u64) -> String {
         out.push(c);
     }
     out
+}
+
+/// 1 -> "1st", 2 -> "2nd", 13 -> "13th", 90 -> "90th".
+fn ordinal(n: u8) -> String {
+    let suffix = match (n % 10, n % 100) {
+        (_, 11..=13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+    format!("{n}{suffix}")
 }

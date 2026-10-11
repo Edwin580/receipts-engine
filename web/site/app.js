@@ -1,11 +1,13 @@
-// The demo page. Loads the single threaded engine build and one snapshot,
-// then drives the engine's JS API (docs/engine/wasm-api.md) from the
-// controls. Every number shown comes from an engine call made here.
+// Loads the engine and one snapshot of NYC 311 data, then answers the
+// question in the form: how long the city took to close complaints of one
+// type in one area. Every number on the page comes from an engine call made
+// here (docs/engine/wasm-api.md); the plans are built in lib.js.
 
 import init, { Engine } from "./pkg/receipts_wasm.js";
 import {
-  METRICS, buildPlan, topTypesPlan, fmtInt, fmtValue, hoursBetween, fmtDuration, fmtWhen,
-  findGroup, flipBit, shortHash, reasonKey, fmtPrecise,
+  BOROUGHS, MIN_RANKED, waitPlan, keyPlan, fasterPlan, questionFor, whyNotCounted, toSearch, fromSearch, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan,
+  parseDistrict, districtName, boroughName, areaName, areaKey, parseAreaKey, rankOf, ordinal,
+  fmtInt, fmtDuration, fmtWhen, hoursBetween, periodName, typeName, shortHash,
 } from "./lib.js";
 
 const $ = (id) => document.getElementById(id);
@@ -19,29 +21,29 @@ const el = (tag, attrs = {}, ...kids) => {
   for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false) e.append(k);
   return e;
 };
-const ms = (x) => (x < 10 ? x.toFixed(1) : Math.round(x).toString()) + " ms";
-const SOURCE_ROW = (key) => `https://data.cityofnewyork.us/resource/erm2-nwe9.json?unique_key=${key}`;
+const CITY_RECORD = (key) => `https://data.cityofnewyork.us/resource/erm2-nwe9.json?unique_key=${key}`;
 const PAGE = 10;
-const MOVERS = 10;
+const LIST_MAX = 200;
+const TYPES = 30;
 
 const state = {
   engine: null,
-  report: null,
-  files: null,
-  query: { type: null, groupBy: "borough", metric: "mean", dropBackwards: true },
-  plan: null,
-  base: null,       // run() result
-  cf: null,         // exclude() result, or null
-  key: undefined,   // group value of the selected row
-  ids: null,        // source rows behind the selected number
+  snapshot: null,
+  period: "",
+  fetchedAt: "",
+  q: { type: null, area: { kind: "city" } },
+  complaint: null,  // the complaint number being checked, if any
+  order: "slowest",
+  list: [],
+  columns: [],
   shown: 0,
-  movers: null,     // contributions() result
 };
 
 function setStatus(text, error = false) {
   const s = $("status");
   s.textContent = text;
   s.classList.toggle("error", error);
+  s.hidden = !text;
 }
 
 async function fetchBytes(url, onProgress) {
@@ -49,33 +51,15 @@ async function fetchBytes(url, onProgress) {
   if (!res.ok) throw new Error(`couldn't download ${url} (HTTP ${res.status})`);
   const total = Number(res.headers.get("Content-Length")) || 0;
   if (!res.body || !total) return new Uint8Array(await res.arrayBuffer());
-  const out = new Uint8Array(total);
-  const reader = res.body.getReader();
+  const chunks = [];
   let at = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (at + value.length > total) {
-      // Content-Length was for an encoded body; fall back to growing.
-      const grown = new Uint8Array(Math.max(total * 2, at + value.length));
-      grown.set(out.subarray(0, at));
-      return finishGrowing(reader, grown, at, value, onProgress, total);
-    }
-    out.set(value, at);
-    at += value.length;
-    onProgress(at, total);
-  }
-  return out.subarray(0, at);
-}
-
-async function finishGrowing(reader, buf, at, first, onProgress, total) {
-  let chunks = [buf.subarray(0, at), first];
-  at += first.length;
+  const reader = res.body.getReader();
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     chunks.push(value);
     at += value.length;
+    // Content-Length can be for an encoded body; don't report past it.
     onProgress(Math.min(at, total), total);
   }
   const out = new Uint8Array(at);
@@ -84,54 +68,338 @@ async function finishGrowing(reader, buf, at, first, onProgress, total) {
   return out;
 }
 
+/** Runs a plan and returns the parsed result. The caller drops the execution. */
+function run(plan) {
+  const r = JSON.parse(state.engine.run(JSON.stringify(plan)));
+  if (!r.ok) throw new Error(r.error);
+  return r;
+}
+/** Runs a plan for its output alone. */
+function rows(plan) {
+  const r = run(plan);
+  state.engine.dropExecution(r.execution);
+  return r.output.rows;
+}
+
 async function load() {
   await init();
-  setStatus("Downloading one month of NYC 311 requests.");
   const mb = (n) => (n / 1e6).toFixed(1);
-  const t0 = performance.now();
+  setStatus("Downloading the city's data.");
   const [manifest, data, log, rejects] = await Promise.all([
     fetch("data/manifest.json").then((r) => r.text()),
-    fetchBytes("data/data.arrow", (a, b) => setStatus(`Downloading one month of NYC 311 requests: ${mb(a)} of ${mb(b)} MB.`)),
+    fetchBytes("data/data.arrow", (a, b) => setStatus(`Downloading the city's data: ${mb(a)} of ${mb(b)} MB.`)),
     fetchBytes("data/cleaning_log.arrow", () => {}),
     fetchBytes("data/rejects.arrow", () => {}),
   ]);
-  const downloadMs = performance.now() - t0;
-  setStatus("Checking every hash.");
+  setStatus("Checking the download.");
   await new Promise((r) => setTimeout(r, 0));
 
   state.engine = new Engine();
-  state.files = { manifest, data, log, rejects };
-  state.report = JSON.parse(state.engine.loadSnapshot(manifest, data, log, rejects));
+  const report = JSON.parse(state.engine.loadSnapshot(manifest, data, log, rejects));
+  state.snapshot = report.snapshot_hash;
   const m = JSON.parse(manifest);
-  state.manifest = m;
-  const r = state.report;
   const [from, to] = m.scope.sentence.match(/\d{4}-\d{2}-\d{2}/g) ?? [];
-  const last = to ? new Date(Date.parse(to + "T00:00:00Z") - 86_400_000).toISOString().slice(0, 10) : "";
-  setStatus(
-    `Demo data: ${fmtInt(r.rows)} real requests opened ${from} to ${last}. ` +
-    `Downloaded ${mb(data.length)} MB in ${ms(downloadMs)}, then checked every hash and loaded it in ${ms(r.verify_ms)}.`,
-  );
-  $("scope").textContent =
-    `${m.scope.sentence.replace(/\.$/, "")}. I fetched them from the city's API on ${m.fetch.finished_at.slice(0, 10)}.`;
+  state.period = from && to ? periodName(from, to) : "";
+  state.fetchedAt = m.fetch.finished_at;
+  $("data-line").textContent =
+    `${fmtInt(report.rows)} complaints filed in ${state.period}, downloaded from the city on ${m.fetch.finished_at.slice(0, 10)}. ` +
+    `Before using them, this page checked the download against its published fingerprint (${shortHash(report.snapshot_hash)}).`;
 
-  // The complaint type menu is itself a query.
-  const top = JSON.parse(state.engine.run(JSON.stringify(topTypesPlan(r.snapshot_hash, 15))));
+  // The menus are themselves queries.
+  const types = rows(topTypesPlan(state.snapshot, TYPES));
   const typeSel = $("type");
-  typeSel.append(el("option", { value: "" }, "all"));
-  for (const [name, n] of top.output.rows) typeSel.append(el("option", { value: name }, `${name} (${fmtInt(n)})`));
-  state.engine.dropExecution(top.execution);
-  const preferred = top.output.rows.find(([n]) => n === "Noise - Residential") ?? top.output.rows[0];
-  typeSel.value = preferred[0];
-  state.query.type = preferred[0];
+  for (const [name] of types) typeSel.append(el("option", { value: name }, typeName(name)));
+  state.q.type = (types.find(([n]) => n === "Noise - Residential") ?? types[0])[0];
+  typeSel.value = state.q.type;
 
-  const backwards = (r.known_issues || []).find((k) => k.id === "KI-closed-before-created");
-  if (backwards) $("backwards-note").textContent = ` (${fmtInt(backwards.count)} in this month, across all types)`;
+  const districts = rows(districtsPlan(state.snapshot)).map(([code]) => code).filter(parseDistrict);
+  const areaSel = $("area");
+  areaSel.append(el("option", { value: "city" }, "the whole city"));
+  for (const b of BOROUGHS) {
+    const g = el("optgroup", { label: boroughName(b) });
+    g.append(el("option", { value: areaKey({ kind: "borough", value: b }) }, `all of ${boroughName(b, true)}`));
+    for (const code of districts.filter((c) => parseDistrict(c).borough === b).sort()) {
+      g.append(el("option", { value: areaKey({ kind: "district", value: code }) }, districtName(code)));
+    }
+    areaSel.append(g);
+  }
+  areaSel.append(el("option", { value: "zip" }, "a ZIP code"));
 
-  for (const id of ["metric", "type", "group", "drop-backwards"]) $(id).disabled = false;
-  setupVerify();
-  runQuery();
-  fitSelects();
+  typeSel.addEventListener("change", () => { forgetComplaint(); state.q.type = typeSel.value; answer(); });
+  areaSel.addEventListener("change", () => {
+    forgetComplaint();
+    if (areaSel.value === "zip") {
+      $("zip-wrap").hidden = false;
+      $("zip").focus();
+      if (/^\d{5}$/.test($("zip").value)) setArea({ kind: "zip", value: $("zip").value });
+      fitSelects();
+      return;
+    }
+    $("zip-wrap").hidden = true;
+    setArea(parseAreaKey(areaSel.value));
+  });
+  $("zip").addEventListener("input", () => {
+    const v = $("zip").value.trim();
+    if (/^\d{5}$/.test(v)) { forgetComplaint(); setArea({ kind: "zip", value: v }); }
+  });
+  $("order").addEventListener("change", () => { state.order = $("order").value; listComplaints(); fitSelects(); });
+  $("more").addEventListener("click", showMore);
+  $("lookup").addEventListener("submit", (ev) => { ev.preventDefault(); lookUp($("key").value); });
+  $("copy-link").addEventListener("click", copyLink);
+
+  typeSel.disabled = false;
+  areaSel.disabled = false;
+  $("lookup").hidden = false;
+  setStatus("");
+
+  // A shared link holds the question, and maybe a complaint to check.
+  const want = fromSearch(location.search);
+  // A type outside the menu is used only if the data has it.
+  if (want.type && ![...typeSel.options].some((o) => o.value === want.type)
+      && rows(countsPlan(state.snapshot, { type: want.type, area: { kind: "city" } }))[0][0] === 0) {
+    want.type = null;
+  }
+  if (want.type) {
+    const known = (a) => a.kind === "zip" || [...areaSel.options].some((o) => o.value === areaKey(a));
+    setQuestion({ type: want.type, area: known(want.area) ? want.area : { kind: "city" } });
+  } else {
+    answer();
+  }
+  if (want.complaint) {
+    $("key").value = want.complaint;
+    lookUp(want.complaint);
+  }
   document.fonts?.ready.then(fitSelects);
+}
+
+function forgetComplaint() {
+  $("yours").hidden = true;
+  state.complaint = null;
+}
+
+/** Keeps the address bar on the current question, so it can be shared. */
+function updateUrl() {
+  history.replaceState(null, "", (toSearch(state.q, state.complaint) || location.pathname) + location.hash);
+}
+
+async function copyLink() {
+  const b = $("copy-link");
+  try {
+    await navigator.clipboard.writeText(location.href);
+    b.textContent = "Link copied";
+  } catch {
+    b.textContent = "Couldn't copy; the address bar has the link";
+  }
+  setTimeout(() => { b.textContent = "Copy a link to this answer"; }, 2500);
+}
+
+/** Points the menus at `q`, adding its type if the menu doesn't list it. */
+function setQuestion(q) {
+  const typeSel = $("type");
+  if (![...typeSel.options].some((o) => o.value === q.type)) {
+    typeSel.append(el("option", { value: q.type }, typeName(q.type)));
+  }
+  typeSel.value = q.type;
+  state.q.type = q.type;
+  setArea(q.area);
+}
+
+/** "Check it": find the complaint, switch to its question, say where it stands. */
+function lookUp(raw) {
+  const out = $("yours");
+  out.hidden = false;
+  const key = raw.trim().replace(/^#/, "");
+  if (!/^\d{1,18}$/.test(key)) {
+    out.replaceChildren(el("p", {}, "A complaint number is all digits, like 65671892."));
+    return;
+  }
+  const found = run(keyPlan(state.snapshot, key));
+  const ids = state.engine.traceBackRows(found.execution, 0);
+  state.engine.dropExecution(found.execution);
+  if (ids.length === 0) {
+    out.replaceChildren(el("p", {}, `Complaint #${key} isn't in this data, which covers complaints filed in ${state.period}.`));
+    state.complaint = null;
+    updateUrl();
+    return;
+  }
+  const recs = JSON.parse(state.engine.sourceRecords(state.snapshot, ids.subarray(0, 1)));
+  const rec = Object.fromEntries(recs.columns.map((c, i) => [c, recs.rows[0][i]]));
+  const q = questionFor(rec);
+  setQuestion(q);
+
+  // Where it stands in the answer now on the page.
+  const plan = waitPlan(state.snapshot, q);
+  const wait = run(plan);
+  const trace = JSON.parse(state.engine.traceForward(wait.execution, ids[0]));
+  const closed = wait.output.rows[0][0];
+  state.engine.dropExecution(wait.execution);
+
+  const what = el("p", {},
+    el("a", { class: "key", href: CITY_RECORD(rec.unique_key), title: "The city's record for this complaint" }, `#${rec.unique_key}`),
+    ` ${rec.descriptor ?? typeName(rec.complaint_type)}, ${areaName(q.area, true)}. Filed ${fmtWhen(rec.created_date)}` +
+    (rec.closed_date ? `, closed ${fmtWhen(rec.closed_date)}.` : "."));
+  const why = whyNotCounted(plan, trace.dropped);
+  let verdict;
+  if (!why) {
+    const hours = hoursBetween(rec.created_date, rec.closed_date);
+    const faster = rows(fasterPlan(state.snapshot, q, hours))[0][0];
+    // Counts, not a rounded percentage: 861 of 862 is not "100%".
+    verdict = `It took ${fmtDuration(hours)}, and it is one of the ${fmtInt(closed)} complaints counted above. ` +
+      (faster === 0 ? "None of them was closed faster." : `${fmtInt(faster)} of them were closed faster.`);
+  } else if (why === "open") {
+    // The download time is UTC and the filed time NYC local, so "about".
+    const open = hoursBetween(rec.created_date, state.fetchedAt.replace("Z", ""));
+    verdict = `It had no closed date when the data was downloaded on ${state.fetchedAt.slice(0, 10)}, about ${fmtDuration(open)} after it was filed, so it isn't counted above. Complaints still open are left out of every answer on this page.`;
+  } else if (why === "backwards") {
+    verdict = "Its closed date is earlier than its filed date, so it's left out of the count above as a data error.";
+  } else {
+    verdict = `It isn't counted above. The step that left it out: ${trace.dropped.sentence}`;
+  }
+  out.replaceChildren(what, el("p", {}, verdict));
+  state.complaint = key;
+  updateUrl();
+}
+
+function setArea(area) {
+  state.q.area = area;
+  if (area.kind === "zip") {
+    $("area").value = "zip";
+    $("zip-wrap").hidden = false;
+    $("zip").value = area.value;
+  } else {
+    $("area").value = areaKey(area);
+    $("zip-wrap").hidden = true;
+  }
+  answer();
+}
+
+/** The whole page for the current question. */
+function answer() {
+  const { q, snapshot, engine } = state;
+  const what = typeName(q.type);
+  const where = areaName(q.area, true);
+
+  const wait = run(waitPlan(snapshot, q));
+  const [closed, median, p90] = wait.output.rows[0];
+  const [filed, withDate] = rows(countsPlan(snapshot, q))[0];
+  const stillOpen = filed - withDate;
+  const backwards = withDate - closed;
+
+  $("answer").hidden = false;
+  if (closed === 0) {
+    $("headline").replaceChildren(filed === 0
+      ? `No ${what} complaints were filed in ${where} in ${state.period}.`
+      : `None of the ${fmtInt(filed)} ${what} complaints filed in ${where} in ${state.period} has been closed.`);
+  } else {
+    $("headline").replaceChildren(
+      el("span", { class: "lead" }, `${what} complaints in ${where}, ${state.period}`),
+      "Half were closed within ", el("b", {}, fmtDuration(median)), ".",
+      // replaceChildren would print a null, so leave the line out instead.
+      ...(closed >= 10 ? [el("span", { class: "tail" }, "9 in 10 were closed within ", el("b", {}, fmtDuration(p90)), ".")] : []),
+    );
+  }
+
+  // Context: citywide, and the rank among neighbours.
+  const ctx = [];
+  if (closed > 0 && q.area.kind !== "city") {
+    const city = rows(waitPlan(snapshot, { type: q.type, area: { kind: "city" } }))[0];
+    ctx.push(`Citywide, half were closed within ${fmtDuration(city[1])}, and 9 in 10 within ${fmtDuration(city[2])}.`);
+  }
+  const borough = q.area.kind === "borough" ? q.area.value
+    : q.area.kind === "district" ? parseDistrict(q.area.value)?.borough : null;
+  const cmp = rows(comparePlan(snapshot, { type: q.type, borough }));
+  const slowest = (r) => `${r.rank === 1 ? "" : ordinal(r.rank) + " "}slowest`;
+  if (q.area.kind === "district" && closed > 0) {
+    const r = rankOf(cmp, q.area.value, true);
+    if (r) ctx.push(`That makes it the ${slowest(r)} of ${r.of} districts in ${boroughName(borough, true)} for these complaints.`);
+  } else if (q.area.kind === "borough" && closed > 0) {
+    const r = rankOf(rows(comparePlan(snapshot, { type: q.type, borough: null })), q.area.value, false);
+    if (r) ctx.push(`That makes it the ${slowest(r)} of the ${r.of} boroughs.`);
+  }
+  if (closed > 0 && closed < MIN_RANKED) ctx.push(`Only ${fmtInt(closed)} were closed, so one or two complaints can move this a lot.`);
+  $("context").textContent = ctx.join(" ");
+
+  const cav = [`Counted: ${fmtInt(closed)} closed complaint${closed === 1 ? "" : "s"}.`];
+  if (stillOpen > 0) cav.push(`${fmtInt(stillOpen)} more had no closed date when the data was downloaded and aren't counted.`);
+  if (backwards > 0) cav.push(`${fmtInt(backwards)} marked closed before they were opened are left out.`);
+  $("caveats").textContent = cav.join(" ");
+
+  // How much any one complaint can move the answer.
+  $("sway").textContent = "";
+  if (closed >= 2) {
+    const c = JSON.parse(engine.contributions(wait.execution, 0, "median_hours", 1));
+    const top = c.top[0];
+    if (top && top.without !== null) {
+      const delta = Math.abs(top.without - c.current);
+      $("sway").textContent = delta * 60 < 1
+        ? "Leaving out any one of these complaints would change the answer above by less than a minute."
+        : `Leaving out any one of these complaints would change the answer above by at most ${fmtDuration(delta)}.`;
+    }
+  }
+
+  $("how-section").hidden = false;
+  $("pipeline").replaceChildren(...wait.steps.map((s) =>
+    el("li", {}, el("span", {}, s.sentence), el("span", { class: "counts" }, `${fmtInt(s.rows)} rows`))));
+  engine.dropExecution(wait.execution);
+
+  renderCompare(cmp, borough);
+  listComplaints();
+  fitSelects();
+  updateUrl();
+}
+
+function renderCompare(cmp, borough) {
+  const byDistrict = Boolean(borough);
+  const shown = cmp.filter(([g, , m]) => m !== null && (byDistrict ? parseDistrict(g) : BOROUGHS.includes(g)));
+  $("compare-section").hidden = shown.length === 0;
+  $("compare-head").textContent = byDistrict ? `Districts in ${boroughName(borough, true)}` : "The five boroughs";
+  $("compare-group").textContent = byDistrict ? "district" : "borough";
+  $("compare-caption").textContent = `${typeName(state.q.type)} complaints, slowest first. Pick one to see it.`;
+  const max = Math.max(...shown.map((r) => r[2])) || 1;
+  const current = state.q.area.kind === "district" || state.q.area.kind === "borough" ? state.q.area.value : null;
+  $("compare").tBodies[0].replaceChildren(...shown.map(([g, n, m, p90]) => {
+    const area = byDistrict ? { kind: "district", value: g } : { kind: "borough", value: g };
+    const few = n < MIN_RANKED;
+    return el("tr", { class: g === current ? "selected" : "" },
+      el("td", { class: "group" }, el("button", { type: "button", class: "cell", onclick: () => { forgetComplaint(); setArea(area); } },
+        byDistrict ? districtName(g) : boroughName(g))),
+      el("td", { class: "num" }, fmtInt(n)),
+      el("td", few ? { class: "num few", title: "Too few complaints to rank" } : { class: "num" }, fmtDuration(m)),
+      el("td", { class: few ? "num few tailcol" : "num tailcol" }, n >= 10 ? fmtDuration(p90) : ""),
+      el("td", { class: "bar", "aria-hidden": "true" }, el("span", { style: `width:${(100 * m / max).toFixed(1)}%` })),
+    );
+  }));
+}
+
+function listComplaints() {
+  const r = run(listPlan(state.snapshot, state.q, state.order, LIST_MAX));
+  state.engine.dropExecution(r.execution);
+  state.columns = r.output.columns.map((c) => c.name);
+  state.list = r.output.rows;
+  state.shown = 0;
+  $("list-section").hidden = state.list.length === 0;
+  $("list").replaceChildren();
+  showMore();
+}
+
+function showMore() {
+  const col = Object.fromEntries(state.columns.map((n, i) => [n, i]));
+  const next = state.list.slice(state.shown, state.shown + PAGE);
+  $("list").append(...next.map((r) => {
+    const v = (name) => r[col[name]];
+    const place = [v("location_type"), v("incident_zip") && `ZIP ${v("incident_zip")}`].filter(Boolean).join(", ");
+    return el("li", {},
+      el("span", { class: "what" },
+        el("a", { class: "key", href: CITY_RECORD(v("unique_key")), title: "The city's record for this complaint" }, `#${v("unique_key")}`),
+        " ", v("descriptor") ?? typeName(v("complaint_type"))),
+      el("span", { class: "took" }, fmtDuration(hoursBetween(v("created_date"), v("closed_date")))),
+      el("span", { class: "meta" }, `Filed ${fmtWhen(v("created_date"))}, closed ${fmtWhen(v("closed_date"))}.${place ? " " + place + "." : ""}`),
+    );
+  }));
+  state.shown += next.length;
+  const more = Math.min(PAGE, state.list.length - state.shown);
+  $("more").hidden = more <= 0;
+  $("more").textContent = `Show ${more} more`;
 }
 
 // A select is as wide as its longest option; size each to its chosen one
@@ -139,328 +407,19 @@ async function load() {
 function fitSelects() {
   const probe = el("span", { style: "position:absolute;visibility:hidden;white-space:pre" });
   document.body.append(probe);
-  for (const id of ["metric", "type", "group"]) {
-    const sel = $(id);
-    const cs = getComputedStyle(sel);
+  for (const s of document.querySelectorAll(".ask select")) {
+    // The computed font shorthand is empty when a property it can't express
+    // (font-variant-numeric) is set, so copy the longhands.
+    const cs = getComputedStyle(s);
     for (const k of ["fontFamily", "fontSize", "fontStyle", "fontWeight", "letterSpacing"]) probe.style[k] = cs[k];
-    probe.textContent = sel.options[sel.selectedIndex].text;
-    sel.style.width = `${Math.ceil(probe.getBoundingClientRect().width + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight)) + 4}px`;
+    probe.textContent = s.selectedOptions[0]?.textContent ?? "";
+    const pad = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+    s.style.width = `${Math.ceil(probe.getBoundingClientRect().width + pad) + 4}px`;
   }
   probe.remove();
 }
 
-function readControls() {
-  state.query = {
-    type: $("type").value || null,
-    groupBy: $("group").value,
-    metric: $("metric").value,
-    dropBackwards: $("drop-backwards").checked,
-  };
-  $("judgement-line").hidden = state.query.metric === "count";
-}
-
-function dropCf() {
-  if (state.cf) state.engine.dropExecution(state.cf.execution);
-  state.cf = null;
-}
-
-function runQuery() {
-  readControls();
-  fitSelects();
-  dropCf();
-  if (state.base) state.engine.dropExecution(state.base.execution);
-  state.plan = buildPlan(state.report.snapshot_hash, state.query);
-  const run = JSON.parse(state.engine.run(JSON.stringify(state.plan)));
-  if (!run.ok) {
-    state.base = null;
-    setStatus(`The engine refused the plan: ${run.error}`, true);
-    return;
-  }
-  state.base = run;
-  const rows = run.output.rows;
-  // Keep the same group selected if it still exists.
-  // Otherwise start with the largest group, which makes the best example.
-  let i = findGroup(rows, state.key);
-  if (i < 0) i = rows.reduce((best, r, j) => (r[1] > rows[best][1] ? j : best), 0);
-  renderTable();
-  $("run-caption").textContent =
-    `Ran ${run.steps.length} steps over ${fmtInt(run.steps[0].rows)} rows in ${ms(run.ms)}. ` +
-    "Click a number to see where it came from.";
-  $("plan-json").textContent = JSON.stringify(state.plan, null, 1);
-  for (const s of ["receipts", "whatif", "verify"]) $(s).hidden = false;
-  if (rows.length) select(i);
-}
-
-function valueColumn() {
-  return state.base.output.columns.length - 1;
-}
-
-function renderTable() {
-  const { metric, groupBy } = state.query;
-  const base = state.base;
-  const vc = valueColumn();
-  $("group-head").textContent = { borough: "borough", channel: "reported by", agency: "agency" }[groupBy];
-  $("value-head").textContent = { mean: "mean hours", median: "median hours", count: "requests" }[metric];
-  // For count the value column is the requests column; don't show it twice.
-  $("result").querySelector("thead th:nth-child(2)").hidden = metric === "count";
-
-  const cfRows = state.cf ? state.cf.output.rows : null;
-  const max = Math.max(...base.output.rows.map((r) => r[vc] ?? 0), 1e-9);
-  const tbody = $("result").querySelector("tbody");
-  tbody.replaceChildren();
-  base.output.rows.forEach((row, i) => {
-    const [key, requests] = row;
-    const value = row[vc];
-    const after = cfRows ? cfRows[findGroup(cfRows, key)] : row;
-    const gone = after === undefined;
-    const changed = !gone && cfRows && (after[vc] !== value || after[1] !== requests);
-    const shown = gone ? null : after[vc];
-    const label = key ?? "(missing)";
-    const valueCell = el("td", { class: "num" },
-      gone ? el("span", { class: "gone" }, "gone")
-        : el("button", {
-          type: "button", class: "cell",
-          "aria-label": `${METRICS[metric].label} for ${label}: ${fmtValue(metric, shown)}. Show where it came from.`,
-          onclick: () => select(i),
-        }, fmtValue(metric, shown)),
-      changed ? el("span", { class: "was" }, `was ${fmtValue(metric, value)}`) : null,
-    );
-    const tr = el("tr", { class: key === state.key ? "selected" : "" },
-      el("td", { class: "group" }, label),
-      metric === "count" ? null : el("td", { class: "num" }, fmtInt(gone ? 0 : after[1]),
-        changed && after[1] !== requests ? el("span", { class: "was" }, `was ${fmtInt(requests)}`) : null),
-      valueCell,
-      el("td", { class: "bar", "aria-hidden": "true" }, el("span", { style: `width:${(100 * Math.max(0, shown ?? 0)) / max}%` })),
-    );
-    tbody.append(tr);
-  });
-}
-
-function select(i) {
-  dropCf();
-  const base = state.base;
-  const row = base.output.rows[i];
-  state.key = row[0];
-  const { metric } = state.query;
-  const vc = valueColumn();
-
-  const trace = JSON.parse(state.engine.traceBack(base.execution, i));
-  state.ids = state.engine.traceBackRows(base.execution, i);
-  const label = row[0] ?? "requests with no " + state.query.groupBy;
-  $("selected-line").replaceChildren(
-    `You picked `, el("b", {}, label), `: ${METRICS[metric].label} `,
-    el("b", {}, fmtValue(metric, row[vc])), metric === "count" ? ". " : ` over ${fmtInt(row[1])} requests. `,
-    `The engine traced it back to ${fmtInt(trace.source_rows)} rows of the snapshot in ${ms(trace.ms)}.`,
-  );
-
-  // Pipeline: every step's row count, and how many of those rows feed this number.
-  const traced = new Map(trace.path.map((p) => [p.step, p.rows]));
-  const ol = $("pipeline");
-  ol.replaceChildren(...base.steps.map((s, k) => el("li", {},
-    el("span", {}, s.sentence),
-    el("span", { class: "counts" }, `${fmtInt(s.rows)} rows`,
-      traced.has(k) ? el("span", { class: "traced" }, `${fmtInt(traced.get(k))} feed it`) : null),
-  )));
-
-  state.shown = 0;
-  $("receipt-list").replaceChildren();
-  $("receipts-caption").textContent =
-    `In snapshot order, which is by creation time. Each number links to the same request in the city's own API, so you can check it.`;
-  showMore();
-
-  // What if.
-  $("whatif-body").hidden = metric === "count";
-  $("whatif-count").hidden = metric !== "count";
-  state.movers = null;
-  if (metric !== "count") {
-    state.movers = JSON.parse(state.engine.contributions(base.execution, i, METRICS[metric].column, MOVERS));
-    const k = $("k");
-    k.max = String(state.movers.top.length);
-    k.value = "0";
-    renderMovers();
-  }
-  renderTable();
-}
-
-function recordLine(cols, r) {
-  const c = Object.fromEntries(cols.map((n, j) => [n, r[j]]));
-  const hours = hoursBetween(c.created_date, c.closed_date);
-  return {
-    c,
-    what: [c.complaint_type, c.descriptor].filter(Boolean).join(", "),
-    meta: [
-      `opened ${fmtWhen(c.created_date)}`,
-      c.closed_date ? `closed after ${fmtDuration(hours)}` : "not closed",
-      c.borough, c.agency, c.channel && c.channel.toLowerCase(),
-    ].filter(Boolean).join(" · "),
-  };
-}
-
-function showMore() {
-  const ids = state.ids;
-  const next = ids.subarray(state.shown, state.shown + PAGE);
-  if (next.length) {
-    const recs = JSON.parse(state.engine.sourceRecords(state.report.snapshot_hash, next));
-    const list = $("receipt-list");
-    recs.rows.forEach((r, j) => {
-      const { c, what, meta } = recordLine(recs.columns, r);
-      list.append(el("li", {},
-        el("a", { class: "key", href: SOURCE_ROW(c.unique_key), title: `Snapshot row ${next[j]}` }, `#${c.unique_key}`),
-        " ", what,
-        el("span", { class: "meta" }, meta),
-      ));
-    });
-    state.shown += next.length;
-  }
-  $("receipts-head").textContent = `The requests (${fmtInt(state.shown)} of ${fmtInt(ids.length)} shown)`;
-  $("more").hidden = state.shown >= ids.length;
-}
-
-function renderMovers() {
-  const mv = state.movers;
-  const k = Number($("k").value);
-  $("k-out").textContent = String(k);
-  const metric = state.query.metric;
-  const recs = JSON.parse(state.engine.sourceRecords(
-    state.report.snapshot_hash, new Uint32Array(mv.top.map((t) => t.source_row))));
-  $("movers").replaceChildren(...mv.top.map((t, j) => {
-    const { c, what, meta } = recordLine(recs.columns, recs.rows[j]);
-    return el("li", { class: j < k ? "out" : "" },
-      el("span", {},
-        el("span", { class: "what" }, el("a", { class: "key", href: SOURCE_ROW(c.unique_key) }, `#${c.unique_key}`), " ", what),
-        el("span", { class: "meta" }, meta)),
-      el("span", { class: "without" }, (j < k ? "left out · " : "") + (t.removes_group ? "group gone" : `alone: ${fmtPrecise(t.without)}`)),
-    );
-  }));
-  applyExclusion(k);
-}
-
-function applyExclusion(k) {
-  dropCf();
-  const mv = state.movers;
-  const vc = valueColumn();
-  const metric = state.query.metric;
-  const label = METRICS[metric].label;
-  const header =
-    `The engine scored all ${fmtInt(mv.contributing_rows)} requests in ${ms(mv.ms)}; ` +
-    `${fmtInt(mv.rows_that_change_it)} of them change the number when left out alone. ` +
-    `"Alone" is the value without just that one request, to three decimals.` +
-    (metric === "median" ? " A median moves by one position per request, so many requests tie." : "");
-  if (k === 0) {
-    $("effect").replaceChildren(header);
-    renderTable();
-    return;
-  }
-  const rows = new Uint32Array(mv.top.slice(0, k).map((t) => t.source_row));
-  state.cf = JSON.parse(state.engine.exclude(state.base.execution, rows));
-  const before = state.base.output.rows[findGroup(state.base.output.rows, state.key)][vc];
-  const j = findGroup(state.cf.output.rows, state.key);
-  const after = j < 0 ? null : state.cf.output.rows[j][vc];
-  const how = state.cf.method.kind === "incremental"
-    ? `recomputed ${state.cf.method.groups_recomputed} group${state.cf.method.groups_recomputed === 1 ? "" : "s"} from their remaining rows`
-    : state.cf.method.kind === "rerun" ? "re-ran the plan" : "found nothing to change";
-  $("effect").replaceChildren(
-    `Without these ${k}, the ${label} goes from `,
-    el("span", { class: "num" }, fmtPrecise(before)), " to ",
-    el("span", { class: "num" }, after === null ? "nothing (the group is gone)" : fmtPrecise(after)),
-    `. The engine ${how} in ${ms(state.cf.ms)}, and the table above shows the new values. `,
-    header,
-  );
-  renderTable();
-}
-
-// Verify demo.
-function setupVerify() {
-  const r = state.report;
-  const t = r.timings;
-  $("verify-timings").replaceChildren(
-    `On this load, decoding the ${fmtInt(r.rows)} rows took ${ms(t.decode_ms)}, re-hashing them took ${ms(t.hash_ms)}, ` +
-    `and checking their order took ${ms(t.sort_check_ms)}. Snapshot `,
-    el("span", { class: "key", title: r.snapshot_hash }, shortHash(r.snapshot_hash, 16)),
-    ` matched. Now break it.`,
-  );
-  const n = state.files.data.length;
-  const off = $("offset");
-  off.max = String(n - 1);
-  off.value = String(randomOffset(n));
-  $("offset-of").textContent = `of data.arrow's ${fmtInt(n)} bytes,`;
-  $("random-offset").addEventListener("click", () => {
-    off.value = String(randomOffset(n));
-    $("tamper-out").textContent = "";
-    $("tally").replaceChildren();
-  });
-  $("tamper").addEventListener("click", tamper);
-  $("tamper-many").addEventListener("click", tamperMany);
-}
-
-function randomOffset(n) {
-  return Math.floor(Math.random() * n);
-}
-
-/** Loads the snapshot in a fresh engine with one bit of data.arrow flipped. */
-function tryFlip(offset) {
-  const f = state.files;
-  const bad = flipBit(f.data, offset);
-  const probe = new Engine();
-  const t0 = performance.now();
-  try {
-    const rep = JSON.parse(probe.loadSnapshot(f.manifest, bad, f.log, f.rejects));
-    return { ok: true, ms: performance.now() - t0, hash: rep.snapshot_hash };
-  } catch (e) {
-    return { ok: false, ms: performance.now() - t0, message: e.message };
-  } finally {
-    probe.free();
-  }
-}
-
-function tamper() {
-  const n = state.files.data.length;
-  const off = Math.min(n - 1, Math.max(0, Math.floor(Number($("offset").value) || 0)));
-  $("offset").value = String(off);
-  $("tally").replaceChildren();
-  const out = $("tamper-out");
-  const r = tryFlip(off);
-  out.classList.toggle("refused", !r.ok);
-  out.textContent = r.ok
-    ? `Loaded in ${ms(r.ms)} with snapshot ${shortHash(r.hash, 16)}. Every hash still matched. Hashes cover the ` +
-      "decoded values, not the file layout, so this bit changed no value the engine reads. Try another byte."
-    : `Refused in ${ms(r.ms)}: ${r.message}.`;
-}
-
-async function tamperMany() {
-  const n = state.files.data.length;
-  const runs = 25;
-  const btn = $("tamper-many");
-  btn.disabled = $("tamper").disabled = true;
-  const out = $("tamper-out");
-  out.classList.remove("refused");
-  const tally = new Map();
-  let loaded = 0;
-  let total = 0;
-  for (let i = 0; i < runs; i++) {
-    out.textContent = `Flipping bit ${i + 1} of ${runs}.`;
-    await new Promise((r) => setTimeout(r, 0));
-    const r = tryFlip(randomOffset(n));
-    total += r.ms;
-    if (r.ok) { loaded++; continue; }
-    const key = reasonKey(r.message);
-    const t = tally.get(key) ?? { n: 0, example: r.message };
-    t.n++;
-    tally.set(key, t);
-  }
-  out.textContent =
-    `${runs} random bits, each flipped in a fresh copy of the file: ${runs - loaded} refused, ${loaded} loaded with every ` +
-    `hash intact, none crashed. ${ms(total / runs)} per attempt on average. What caught them:`;
-  $("tally").replaceChildren(...[...tally.values()].sort((a, b) => b.n - a.n).map((t) =>
-    el("li", {}, el("span", { class: "key" }, `${t.n}×`), " ", t.example)));
-  btn.disabled = $("tamper").disabled = false;
-}
-
-for (const id of ["metric", "type", "group", "drop-backwards"]) $(id).addEventListener("change", runQuery);
-$("more").addEventListener("click", showMore);
-$("k").addEventListener("input", () => renderMovers());
-
 load().catch((e) => {
   console.error(e);
-  setStatus(`Something went wrong loading the engine: ${e.message}`, true);
+  setStatus(`Something went wrong: ${e.message}`, true);
 });
