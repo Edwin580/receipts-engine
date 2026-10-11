@@ -1,0 +1,615 @@
+{
+  "format_version": "receipts-snapshot/1",
+  "snapshot_hash": "3c8335165499f2eed7dcba6811de0a58c52cbde42fb76b79f10c614c1538041f",
+  "manifest_hash": "1b6633e43337b508959c604c14d68007438da094fc2265e5deb063070d025866",
+  "source": {
+    "source_id": 1,
+    "dataset": "NYC 311 Service Requests",
+    "portal": "data.cityofnewyork.us",
+    "dataset_id": "erm2-nwe9",
+    "source_url": "https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2010-to-Present/erm2-nwe9",
+    "terms_url": "https://opendata.cityofnewyork.us/overview/#termsofuse",
+    "rows_updated_at": "2026-10-10T01:38:17Z"
+  },
+  "fetch": {
+    "started_at": "2026-10-10T22:41:26Z",
+    "finished_at": "2026-10-10T22:42:52Z",
+    "endpoint": "https://data.cityofnewyork.us/resource/erm2-nwe9.json",
+    "select": [
+      ":id",
+      "unique_key",
+      "created_date",
+      "closed_date",
+      "agency",
+      "complaint_type",
+      "descriptor",
+      "location_type",
+      "incident_zip",
+      "borough",
+      "community_board",
+      "status",
+      "open_data_channel_type",
+      "latitude",
+      "longitude"
+    ],
+    "where": "created_date >= '2025-07-01T00:00:00' AND created_date < '2025-08-01T00:00:00'",
+    "order": ":id",
+    "pagination": {
+      "kind": "keyset",
+      "key": ":id",
+      "page_size": 50000
+    },
+    "pages": 7,
+    "raw_records": 315883,
+    "raw_hash": "8995d0bc3d882ede90f47796c3caa1b81568b49b165f9ce6a69ec30c68ef10cf",
+    "metadata_hash": "40ffe82362b8d1bf378581f402271c7e36ef7d87204fd8e588ade325fe70edc6",
+    "rows_updated_at_start": "2026-10-10T01:38:17Z",
+    "rows_updated_at_end": "2026-10-10T01:38:17Z",
+    "tool_version": "receipts-snapshot 0.0.0 (git 3865bc15d5c4)"
+  },
+  "build": {
+    "tool_version": "receipts-snapshot 0.0.0 (git 3865bc15d5c4)"
+  },
+  "scope": {
+    "sentence": "311 service requests created from 2025-07-01 up to (not including) 2025-08-01, NYC local time.",
+    "predicate": {
+      "column": "created_date",
+      "gte": "2025-07-01T00:00:00",
+      "lt": "2025-08-01T00:00:00"
+    }
+  },
+  "row_count": 315883,
+  "chunk_rows": 65536,
+  "chunk_count": 5,
+  "sort_key": [
+    "created_date",
+    "unique_key"
+  ],
+  "schema": [
+    {
+      "index": 0,
+      "name": "unique_key",
+      "type": "i64",
+      "nullable": false,
+      "source_fields": [
+        "unique_key"
+      ],
+      "description": "The city's ID for this service request.",
+      "null_count": 0,
+      "column_hash": "9c807253400a4d8804ab5f1ec7a6f85bd7685962e6e81c8d8b0d168d3f31c569",
+      "chunk_hashes": [
+        "697e6c00b126e32cb0ebc7d6233f6453370f8d4dea4f5028beb028283498fb61",
+        "216060483c27347817fb234f3c9a81b3b089701254f1707259321901f286a9e7",
+        "1a6db9a5e088905adfca44a724758f98b8a0709643d55cd6918bb8bcea8d496c",
+        "4695555f400d5504137368dae03bfd140227f6477c59924171f5abdd89928dbe",
+        "41811ccadbed8e13516e9a17a086312ecbfabc59b951fc1874a752817777ff66"
+      ]
+    },
+    {
+      "index": 1,
+      "name": "created_date",
+      "type": "timestamp",
+      "nullable": false,
+      "source_fields": [
+        "created_date"
+      ],
+      "description": "When the request was made (NYC local time).",
+      "null_count": 0,
+      "column_hash": "adf40c8e010322e189e4931fb7e3629141b81cfd15d9c0df1c0ac597f6b3e9c8",
+      "chunk_hashes": [
+        "1161ae52bf05fd00c9dbf91bfb8e6332e0f2e8c3d70faa1feee050aaea6ea5c8",
+        "7dc672da8f0230451b6abfeaeaaa822643c6b0715beafacd5792755ffa2d1777",
+        "5fd4c05420d0a87a59144dfbe5c4b647cdb9900da8edce0c3d337588d7aeb7ae",
+        "351e2cf91ae47f7575c36f6cc59a2b991611506463d736c19a3b49d21b3be44d",
+        "c9694f9260ec35196f5d72416945bd17d49dad8eddcf49edfe7045f8f964dc93"
+      ]
+    },
+    {
+      "index": 2,
+      "name": "closed_date",
+      "type": "timestamp",
+      "nullable": true,
+      "source_fields": [
+        "closed_date"
+      ],
+      "description": "When the city marked the request closed (NYC local time), exactly as published.",
+      "null_count": 4029,
+      "column_hash": "54a41dd80adfd7846aac4eb70ffbc6080effe812fb711239fad0e3fc39939d46",
+      "chunk_hashes": [
+        "d078943e4d24d94ff273f549320e99675c3fbae80ad3419bc06b221853c9b4ea",
+        "1ed0ad78887d9f3e24c2fe36b6379e85178591c6acff67bbdbfe8f317cfd1ec9",
+        "eff8a9409ea14d183173c3f5a8fd349fd8a03acfdee0e5fae931663c04297be1",
+        "b6be5b82ae0b0478f19fc71814416ba4ce3643da0df977ab2254d4289295fa30",
+        "bf6352d539c83f9815769311233461efc219c55c119e3fc307da2af321363d92"
+      ]
+    },
+    {
+      "index": 3,
+      "name": "agency",
+      "type": "utf8_dict",
+      "nullable": true,
+      "source_fields": [
+        "agency"
+      ],
+      "description": "The city agency the request was routed to.",
+      "null_count": 0,
+      "dictionary_size": 14,
+      "dictionary_hash": "e9d2f020d961acdb0cfc7e60496a2bdda7ac0c2bb5665331bc6ce0a2e50060fd",
+      "column_hash": "e3df948caf750aa7b698b702869346cc51ce32d75ef2c6be3acb97819a438918",
+      "chunk_hashes": [
+        "8c16c2877a52603662c9e3b26028476f7c324e67d0a103410a210f7f5756f769",
+        "ad5882a79fda014bcdbf2555bf2d0422a0d01baf0f19a422692b19366cf1a564",
+        "0685bed80dcad56fdf91aae9c1c1826d6e7382726f4776863e1ef0c848e587a2",
+        "783f0bd71483684c2e8dd0ce1abf7add8d42cad53ec0103b81e3dc8d70094664",
+        "90faad1dfde0af8ff3278f1f17b1a38a5334466de490217781c91a54180859cc"
+      ]
+    },
+    {
+      "index": 4,
+      "name": "complaint_type",
+      "type": "utf8_dict",
+      "nullable": true,
+      "source_fields": [
+        "complaint_type"
+      ],
+      "description": "The kind of problem reported.",
+      "null_count": 0,
+      "dictionary_size": 171,
+      "dictionary_hash": "e7aaa038ba41ee357c6eeb97538eb1b0ccee2823e24e839afe49d69c1bf00151",
+      "column_hash": "9e61c1754ed83b425def8653494e94c62306bb50245793bc8610e8e221b6d9da",
+      "chunk_hashes": [
+        "baf47b64ea76df33e3b11eee7d08159c6a9593e224eb10c407dec7f8f7cf1f98",
+        "7038e5571a3d2be6c834b6b5e28366bad6419a0c808c7eb51c4d1c3278dbcca7",
+        "d04b9b60659ff7c6980e67e582c337cbb132569605031b0fee08e3d9dab7c5c2",
+        "1f327640a3bb75b2b2d4267f42b61e24a9cc7073be79f2c8a7b75e49e1aba4c2",
+        "c5f8cd5b0ba9fa7411aad21257b4c21e2bd597f776ada498d73f1c5168df148a"
+      ]
+    },
+    {
+      "index": 5,
+      "name": "descriptor",
+      "type": "utf8_dict",
+      "nullable": true,
+      "source_fields": [
+        "descriptor"
+      ],
+      "description": "More detail on the kind of problem.",
+      "null_count": 0,
+      "dictionary_size": 806,
+      "dictionary_hash": "dd97ce6d0e85aebe25a303181d9ade7c9c7de127228b85d5184d90f98c557654",
+      "column_hash": "97c057af5f3afd2d12c5d7ee3e5d5e34b25e20fe84a3260c44777567efd59919",
+      "chunk_hashes": [
+        "62915b556e4e9f55663c14b30c692be98e0de9e6b9c7cfbba147322436e4aa5e",
+        "2d270a9bf53edb55f55e53498b046ddf3b67aaa843214192524c01c241742b51",
+        "f8c4be39ee7c92f8f34dc9d642e1eb6406f67bc1403693be4d26d9e88ea978f4",
+        "1a8e8854562ea4514f8eb1b4a1fcb71437fb603bf441ab66ae09129832597db3",
+        "16547b3cf32d22ea3044783b42c90b165b3a447127e2bdd6a0f7a8ddff09c1a0"
+      ]
+    },
+    {
+      "index": 6,
+      "name": "location_type",
+      "type": "utf8_dict",
+      "nullable": true,
+      "source_fields": [
+        "location_type"
+      ],
+      "description": "The type of place, such as a residential building or a street.",
+      "null_count": 45430,
+      "dictionary_size": 128,
+      "dictionary_hash": "d8e2e15bd8c1171f35d32441048ffbf770c7bc4c7cf4dd072134f2c1a764f4b1",
+      "column_hash": "c52df3e0b2e70983baf38ec13afe3145c76a502f1905aa87e8fe8912054b9b70",
+      "chunk_hashes": [
+        "44be7a107839a7b8df862726b724cfcce4a6fe8816c226f95ece291fa4c02938",
+        "ac15c82ccc64378717164e9c7ae608a24b1c9cae2c183e84daead547511e2005",
+        "fa9293ca7fd4aa7d42e321f3007278672817223c6d35caf17cb3f9fd7353ebe6",
+        "6de67b6456a2d2a748ff4032ea7f7ae613a2f49bd0ed7785db5f05ec65e5a6ac",
+        "c54a4ef605ee6f641f77eedec0f9c2f83ce007f270c4d9a1b4414248cfef84a2"
+      ]
+    },
+    {
+      "index": 7,
+      "name": "incident_zip",
+      "type": "utf8_dict",
+      "nullable": true,
+      "source_fields": [
+        "incident_zip"
+      ],
+      "description": "ZIP code of the problem, as published.",
+      "null_count": 2408,
+      "dictionary_size": 241,
+      "dictionary_hash": "07594d634333c3edcbc996394cb1799f6ef7cfb5945d3fb67bc10db302c785ed",
+      "column_hash": "1633248cf6e147f2bb0c4078e43edda987d57ae5184f106a44d3b2c82981a259",
+      "chunk_hashes": [
+        "19f01df9473e5bfcbe5cece67308819ce77bf753626584dfe6e79a79636e6053",
+        "6c0fe69f536e4942662c0638c1dc644665a76bc9a4fc2768525aed44a359a0b2",
+        "a2faa72158085fc38763cf7647aab16fe38ee7be49e7954f05ec801efe6e92e9",
+        "6fef9db09af0fe436ad5a8d702604c0a9734bd23cb3ade144192c491b0ee24e4",
+        "5f17d7b8449594103d329549f55ff8a6af208bf217d0836cd2ae4547ebde5d49"
+      ]
+    },
+    {
+      "index": 8,
+      "name": "borough",
+      "type": "utf8_dict",
+      "nullable": true,
+      "source_fields": [
+        "borough"
+      ],
+      "description": "Borough the request was about. 'Unspecified' is the city's own label for requests without one.",
+      "null_count": 0,
+      "dictionary_size": 6,
+      "dictionary_hash": "d363663ac1728d71a61c48680fc9efb71df05d1b7a882731bed3827426636494",
+      "column_hash": "939739c7b6c2cd3071eef014d573ad3f9888b39a122423a371d9d6d9f596e8d4",
+      "chunk_hashes": [
+        "bf3a0d8c731f1804dc7040227b8d64bd9994ac3e18e4441d162c687bff831ecb",
+        "35b510069e1585052f3c874f1a3b48e27c91123b8205fe89a6b98405b84c242a",
+        "bfc54f78a3eeeb1856e4067d4181da26e7cded82a6206844f9199e9e732fb7b1",
+        "dc6162b1830c828959ba99aedbc429868b09716247e604320b12c89c34666c7f",
+        "2d61ee92ab4be92d3e2a71f323fc0834c6ddb395d83a09249e8a8eba862d793e"
+      ]
+    },
+    {
+      "index": 9,
+      "name": "community_board",
+      "type": "utf8_dict",
+      "nullable": true,
+      "source_fields": [
+        "community_board"
+      ],
+      "description": "Community board district, such as '12 MANHATTAN'.",
+      "null_count": 0,
+      "dictionary_size": 77,
+      "dictionary_hash": "36ea7ca8dea38bd560edb625b3bcc7e0bf9b377e1ef89f78fdbc2a13fac8f269",
+      "column_hash": "c1848726e545a0c414f050e45d6ba38be653f6f1d7c0cdc3b62e922450a57c15",
+      "chunk_hashes": [
+        "f973c1df3a295b969a67396205c070b746b7da1f1642e7aee9a698650069287a",
+        "e56f14f8f5a37a72a83855d5d9e2f3831b42f471bbeb987dc264eb382008b118",
+        "89b6a55a49e59865813ad1daff689eac75311168bc30ba1b13c994b292979dde",
+        "7ca10cea5b08b6279a21b70b5e418cc7c729e555a52174b8eaf7d29cdf38b87c",
+        "b5001818b4f4210a7722f500c4dc78b9efcd723a90e84c1d13c514416b1e5330"
+      ]
+    },
+    {
+      "index": 10,
+      "name": "status",
+      "type": "utf8_dict",
+      "nullable": true,
+      "source_fields": [
+        "status"
+      ],
+      "description": "Status of the request when the data was fetched.",
+      "null_count": 0,
+      "dictionary_size": 7,
+      "dictionary_hash": "2418d78b45732b15fec3fa32baeb03961e278321b0c206c5008d97742c492cc9",
+      "column_hash": "3b15a25da4df03389ee0a47fda414f839639e65d606170f27b4aefac7d5c3416",
+      "chunk_hashes": [
+        "406d9734cb95bff44a0c4b928cbb0895ebd5a40b50701058c2fe9fbc218a80da",
+        "06bef2cf8a01d201ed58d08a3a2f1c069f123ccbbd257cd5cae21dc82b7ad20b",
+        "391087aa05a87b9c096c591f3e37248009aa686b5e93119848134441decd9f07",
+        "ddb7993a7c97f694c7502766aeb385cf93b1be4d22e3ae27b544fd4e2442def0",
+        "cad36fc157f89bbe26d7baa0be7c3291fbf0bda1578053b93c3ee965ddf2092b"
+      ]
+    },
+    {
+      "index": 11,
+      "name": "channel",
+      "type": "utf8_dict",
+      "nullable": true,
+      "source_fields": [
+        "open_data_channel_type"
+      ],
+      "description": "How the request was made: phone, online, mobile app, and so on.",
+      "null_count": 0,
+      "dictionary_size": 5,
+      "dictionary_hash": "f8a8147cba66e761ed96de14b3009eac42721c7b840c3e5647ca699fc2fd43fa",
+      "column_hash": "7a52c5fd2d0e8e8bb8e50322d30366bb1937425c36b17b9432f0e8064cfe53e5",
+      "chunk_hashes": [
+        "b30626e05dac92644c13e115986712ee36f042b5a7738ae48e71cf9549ce2262",
+        "0abad66c213e614e01f397fbdb9a374a580763352d643f7b6c2452247a206cc1",
+        "f1ee616fb284ee2a533367a10b7ee723fad97be2759f2759f7698cfe20fd6441",
+        "2f034b0199a2a7ac2d5d11d04d9b9611bd37c62dd5e31ae7f8a6ff82d26f3b4a",
+        "5401d7e5357a11d198daa129d8b07a0eabba70c07193d02d78a48c1c5683b237"
+      ]
+    },
+    {
+      "index": 12,
+      "name": "location",
+      "type": "geo",
+      "nullable": true,
+      "source_fields": [
+        "latitude",
+        "longitude"
+      ],
+      "description": "Where the problem was reported, as latitude/longitude (stored to about 0.3 m).",
+      "null_count": 5177,
+      "column_hash": "f3d30b7c377100a1545e1109875b1b8dd1f12b4375b7e7baa38eefa30e83d96c",
+      "chunk_hashes": [
+        "bb938a2ac2a26b35ac913a67fcf7c1e2ad8c22a3ed2e368ed3cceba3684fcea1",
+        "1ede7afe39cb9323feccefa841ecc9ba9095b6291bad79bea7223cd624b068ac",
+        "a77d2506d358e98ecd5394a0aecf36463d15463b4611fef84ed40d494892922d",
+        "2698961031cc8d8aa60ec6fb40e9da82905d60afbf7c77c31afaa4b851900f4b",
+        "d65c4924823c09def33b6c611865aa117dd09d353579ef658e7a46115c1c4c2a"
+      ]
+    }
+  ],
+  "excluded_columns": [
+    {
+      "field": "resolution_description",
+      "reason": "Free text; large and high-cardinality."
+    },
+    {
+      "field": "resolution_action_updated_date",
+      "reason": "Not needed for v1 claims."
+    },
+    {
+      "field": "incident_address",
+      "reason": "Free text address."
+    },
+    {
+      "field": "street_name",
+      "reason": "Free text address."
+    },
+    {
+      "field": "cross_street_1",
+      "reason": "Free text address."
+    },
+    {
+      "field": "cross_street_2",
+      "reason": "Free text address."
+    },
+    {
+      "field": "intersection_street_1",
+      "reason": "Free text address."
+    },
+    {
+      "field": "intersection_street_2",
+      "reason": "Free text address."
+    },
+    {
+      "field": "address_type",
+      "reason": "Describes the address fields, which are excluded."
+    },
+    {
+      "field": "city",
+      "reason": "Redundant with borough and ZIP; inconsistently filled."
+    },
+    {
+      "field": "landmark",
+      "reason": "Free text."
+    },
+    {
+      "field": "facility_type",
+      "reason": "Sparse, domain-specific."
+    },
+    {
+      "field": "due_date",
+      "reason": "Sparse."
+    },
+    {
+      "field": "agency_name",
+      "reason": "Redundant with agency."
+    },
+    {
+      "field": "bbl",
+      "reason": "Parcel ID; sparse and not needed for v1."
+    },
+    {
+      "field": "x_coordinate_state_plane",
+      "reason": "Redundant with latitude/longitude."
+    },
+    {
+      "field": "y_coordinate_state_plane",
+      "reason": "Redundant with latitude/longitude."
+    },
+    {
+      "field": "park_facility_name",
+      "reason": "Sparse, domain-specific."
+    },
+    {
+      "field": "park_borough",
+      "reason": "Redundant with borough."
+    },
+    {
+      "field": "vehicle_type",
+      "reason": "Sparse, domain-specific."
+    },
+    {
+      "field": "taxi_company_borough",
+      "reason": "Sparse, domain-specific."
+    },
+    {
+      "field": "taxi_pick_up_location",
+      "reason": "Sparse, domain-specific."
+    },
+    {
+      "field": "bridge_highway_name",
+      "reason": "Sparse, domain-specific."
+    },
+    {
+      "field": "bridge_highway_direction",
+      "reason": "Sparse, domain-specific."
+    },
+    {
+      "field": "road_ramp",
+      "reason": "Sparse, domain-specific."
+    },
+    {
+      "field": "bridge_highway_segment",
+      "reason": "Sparse, domain-specific."
+    },
+    {
+      "field": "location",
+      "reason": "Redundant with latitude/longitude."
+    }
+  ],
+  "cleaning": {
+    "rules_version": 1,
+    "rules": [
+      {
+        "id": "CR-01",
+        "action": "fail",
+        "count": 0,
+        "counts": "failures (always 0 in a finished snapshot)",
+        "description": "An expected source field is missing or has changed type: the build stops."
+      },
+      {
+        "id": "CR-02",
+        "action": "reject",
+        "count": 0,
+        "counts": "records rejected",
+        "description": "The record has no usable ID (missing, or not a positive whole number without leading zeros)."
+      },
+      {
+        "id": "CR-03",
+        "action": "reject",
+        "count": 0,
+        "counts": "records rejected",
+        "description": "Another record has the same ID and identical values; one copy is kept."
+      },
+      {
+        "id": "CR-04",
+        "action": "reject",
+        "count": 0,
+        "counts": "records rejected",
+        "description": "Several records share an ID but disagree; all copies are rejected because none can be preferred."
+      },
+      {
+        "id": "CR-05",
+        "action": "reject",
+        "count": 0,
+        "counts": "records rejected",
+        "description": "The creation time is missing or unreadable."
+      },
+      {
+        "id": "CR-06",
+        "action": "null",
+        "count": 0,
+        "counts": "values changed (one cleaning-log row each)",
+        "description": "The closed time is unreadable, so it is recorded as missing."
+      },
+      {
+        "id": "CR-07",
+        "action": "normalize",
+        "count": 0,
+        "counts": "values changed (one cleaning-log row each)",
+        "description": "Spaces at the start or end of a text value were removed."
+      },
+      {
+        "id": "CR-08",
+        "action": "null",
+        "count": 0,
+        "counts": "values changed (one cleaning-log row each)",
+        "description": "A text value was empty, so it is recorded as missing."
+      },
+      {
+        "id": "CR-09",
+        "action": "null",
+        "count": 0,
+        "counts": "values changed (one cleaning-log row each)",
+        "description": "Only one coordinate is present, or a coordinate is unreadable, so the location is recorded as missing."
+      },
+      {
+        "id": "CR-10",
+        "action": "normalize",
+        "count": 310706,
+        "counts": "values affected (not logged individually)",
+        "description": "Coordinates are stored in single precision (at most about 0.3 m of rounding in NYC)."
+      },
+      {
+        "id": "CR-11",
+        "action": "normalize",
+        "count": 0,
+        "counts": "values affected (not logged individually)",
+        "description": "Times with fractions of a second are kept to the microsecond (no loss)."
+      },
+      {
+        "id": "CR-12",
+        "action": "reject",
+        "count": 0,
+        "counts": "records rejected",
+        "description": "The creation time is outside the snapshot's date range, even though the API returned the record."
+      }
+    ],
+    "rejected_rows": 0,
+    "cleaning_log_rows": 0,
+    "cleaning_log_hash": "7edcce1bfb81b31eade6ebdfc6fd882953c7d7c834fec244fb7af656ae84c97e",
+    "rejects_hash": "5ea40892b3b923995af72431201c140ea9673cec15406f368d845b563d8e84fb"
+  },
+  "known_issues": [
+    {
+      "id": "KI-closed-before-created",
+      "columns": [
+        "created_date",
+        "closed_date"
+      ],
+      "count": 64,
+      "sentence": "64 requests have a closed date earlier than their created date."
+    },
+    {
+      "id": "KI-closed-before-2010",
+      "columns": [
+        "closed_date"
+      ],
+      "count": 0,
+      "sentence": "0 requests have a closed date before 2010, when this dataset starts; these are usually placeholder dates."
+    },
+    {
+      "id": "KI-closed-in-future",
+      "columns": [
+        "closed_date"
+      ],
+      "count": 0,
+      "sentence": "0 requests have a closed date more than a day after the data was last updated."
+    },
+    {
+      "id": "KI-created-midnight",
+      "columns": [
+        "created_date"
+      ],
+      "count": 193,
+      "sentence": "193 requests were created at exactly midnight, which usually means only the date was recorded."
+    },
+    {
+      "id": "KI-location-outside-nyc",
+      "columns": [
+        "location"
+      ],
+      "count": 0,
+      "sentence": "0 requests have a location outside New York City."
+    },
+    {
+      "id": "KI-borough-unspecified",
+      "columns": [
+        "borough"
+      ],
+      "count": 258,
+      "sentence": "258 requests have the borough 'Unspecified'."
+    },
+    {
+      "id": "KI-zip-not-5-digits",
+      "columns": [
+        "incident_zip"
+      ],
+      "count": 1,
+      "sentence": "1 requests have a ZIP code that is not five digits."
+    }
+  ],
+  "files": [
+    {
+      "path": "data.arrow",
+      "bytes": 10694330,
+      "compression": "lz4_frame"
+    },
+    {
+      "path": "cleaning_log.arrow",
+      "bytes": 1706,
+      "compression": "lz4_frame"
+    },
+    {
+      "path": "rejects.arrow",
+      "bytes": 1834,
+      "compression": "lz4_frame"
+    }
+  ]
+}
