@@ -39,8 +39,15 @@ jobs:
         run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked
       - name: Build both WASM packages and the site's copy
         run: tools/wasm/build.sh
-      - name: Demo page tests (plans, formatting, the real demo snapshot)
-        run: node --test web/site/test/*.test.mjs
+      - name: Site tests (plans, formatting, the committed NYC snapshot, a synthetic Westchester one)
+        run: |
+          cargo build --release -q -p receipts-snapshot
+          B=target/release/receipts-snapshot
+          $B synth --source westchester --out "$RUNNER_TEMP/wraw" --rows 3000 --seed 7 --from 2025-01-01 --to 2026-01-01
+          $B build --source westchester --raw "$RUNNER_TEMP/wraw" --out "$RUNNER_TEMP/wsnap"
+          mkdir -p web/site/westchester/data
+          cp "$RUNNER_TEMP"/wsnap/*/{manifest.json,data.arrow,cleaning_log.arrow,rejects.arrow} web/site/westchester/data/
+          node --test web/site/test/*.test.mjs
       - name: Native parity and browser runs on a synthetic snapshot
         run: |
           cargo build --release -p receipts-snapshot -p receipts-wasm --bin receipts-snapshot --bin receipts-engine

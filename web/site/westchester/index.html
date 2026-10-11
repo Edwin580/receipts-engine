@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How long do Westchester towns take?</title>
+<meta name="description" content="How long five Westchester towns took to close residents' requests, from their public SeeClickFix records, with every request behind the number.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../style.css">
+<link rel="preload" href="../fonts/et-book-roman-line-figures.woff" as="font" type="font/woff" crossorigin>
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<article>
+
+<header>
+  <h1>How long do Westchester towns take?</h1>
+  <p class="subtitle">See how long your town took to close requests like yours, and read the requests behind the number.</p>
+  <p class="intro">Five Westchester towns, Mount Pleasant, Greenburgh, Mount Vernon, North Castle and Peekskill, take residents' requests through SeeClickFix: potholes, fallen trees, blocked storm drains, broken streetlights and more. SeeClickFix publishes when each request was opened and closed. Pick a kind of request and a town to see how long it usually took, how that compares with the other towns, and the requests themselves. Yonkers and most other towns don't publish their records, so they aren't here.</p>
+</header>
+
+<section id="ask">
+  <p class="status" id="status" role="status">Loading.</p>
+
+  <form id="query" class="ask" aria-label="Your question">
+    <p>
+      <select id="type" aria-label="Request type" disabled></select>
+      requests in
+      <select id="area" aria-label="Town" disabled></select>
+    </p>
+  </form>
+
+  <div id="answer" aria-live="polite" hidden>
+    <p class="headline" id="headline"></p>
+    <p id="context"></p>
+    <p class="caption" id="caveats"></p>
+    <p class="caption"><button type="button" class="text" id="copy-link">Copy a link to this answer</button></p>
+  </div>
+</section>
+
+<section id="compare-section" hidden>
+  <h2>The five towns</h2>
+  <p class="caption" id="compare-caption"></p>
+  <table id="compare" class="result">
+    <thead><tr><th scope="col">town</th><th scope="col" class="num">closed</th><th scope="col" class="num">half closed within</th><th scope="col" class="num tailcol">9 in 10 within</th><th scope="col" class="bar" aria-hidden="true"></th></tr></thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+<section id="list-section" hidden>
+  <h2>The requests</h2>
+  <p class="ask small">
+    Showing the ones that
+    <select id="order" aria-label="Order">
+      <option value="slowest">took longest</option>
+      <option value="fastest">closed fastest</option>
+      <option value="recent">were filed most recently</option>
+    </select>.
+    Each number links to the request on SeeClickFix.
+  </p>
+  <ul class="receipts" id="list"></ul>
+  <p><button type="button" class="text" id="more" hidden>Show 10 more</button></p>
+</section>
+
+<section id="how-section" hidden>
+  <details id="how">
+    <summary>How this was counted</summary>
+    <p>Each step below was run on the towns' records in your browser, in this order. The sentences are generated from the query itself.</p>
+    <ol class="pipeline" id="pipeline"></ol>
+  </details>
+</section>
+
+<footer class="foot">
+  <p>Data from <a href="https://seeclickfix.com/">SeeClickFix</a>'s public records for these towns. "Closed" means the town marked the request closed, which isn't always the same as fixed. This site is not affiliated with SeeClickFix or any town.</p>
+  <p id="data-line"></p>
+  <p><a href="../">New York City</a> · <a href="../methods.html">Methods and limits</a> · <a href="https://github.com/Edwin580/receipts-engine">Source code</a></p>
+</footer>
+
+</article>
+<noscript><p class="status">This page computes everything in your browser, so it needs JavaScript.</p></noscript>
+</body>
+</html>

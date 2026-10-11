@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  waitPlan, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan, ORDERS, keyPlan, fasterPlan, questionFor, whyNotCounted, toSearch, fromSearch,
+  waitPlan, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan, ORDERS, keyPlan, fasterPlan, questionFor, whyNotCounted, toSearch, fromSearch, townsPlan, townListPlan,
   parseDistrict, districtName, boroughName, areaName, areaKey, parseAreaKey, rankOf, ordinal,
   fmtInt, fmtDuration, fmtWhen, hoursBetween, periodName, typeName, shortHash,
 } from "../lib.js";
@@ -153,4 +153,16 @@ test("links: the question round-trips through the URL, bad parts fall back", () 
   assert.deepEqual(fromSearch(""), { type: null, area: { kind: "city" }, complaint: null });
   assert.deepEqual(fromSearch("?type=&area=zip:12&complaint=12x"), { type: null, area: { kind: "city" }, complaint: null });
   assert.deepEqual(fromSearch("?area=borough%3AQUEENS").area, { kind: "borough", value: "QUEENS" });
+});
+
+test("towns: an area kind of their own", () => {
+  const town = { kind: "town", value: "Mount Pleasant" };
+  assert.equal(areaName(town), "Mount Pleasant");
+  assert.deepEqual(parseAreaKey(areaKey(town)), town);
+  assert.deepEqual(fromSearch(toSearch({ type: "Potholes", area: town })).area, town);
+  const filters = waitPlan(S, { type: "Potholes", area: town }).nodes.filter((n) => n.op === "filter");
+  assert.equal(filters[1].predicate.args[0].column, "town");
+  assertChain(townsPlan(S, "Potholes"));
+  assertChain(townListPlan(S));
+  assert.deepEqual(townsPlan(S, "Potholes").nodes.at(-2).group_by, ["town"]);
 });

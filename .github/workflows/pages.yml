@@ -52,9 +52,45 @@ jobs:
             rm -rf web/site/data
             cp -r "$RUNNER_TEMP/committed" web/site/data
           fi
+      - name: Restore the last Westchester data that was published
+        uses: actions/cache/restore@v4
+        with:
+          path: web/site/westchester/data
+          key: westchester-${{ github.run_id }}
+          restore-keys: westchester-
+      - name: Fetch the Westchester towns' requests
+        id: westchester
+        continue-on-error: true
+        run: tools/site/refresh-westchester.sh "$RUNNER_TEMP/westchester"
+      - name: Use them if the Westchester tests pass on them
+        if: steps.westchester.outcome == 'success'
+        run: |
+          rm -rf "$RUNNER_TEMP/westchester-previous"
+          if [ -d web/site/westchester/data ]; then cp -r web/site/westchester/data "$RUNNER_TEMP/westchester-previous"; fi
+          mkdir -p web/site/westchester/data
+          cp "$RUNNER_TEMP"/westchester/* web/site/westchester/data/
+          if ! node --test web/site/test/westchester.test.mjs; then
+            echo "::warning::The Westchester tests fail on the new data; publishing the previous data."
+            rm -rf web/site/westchester/data
+            if [ -d "$RUNNER_TEMP/westchester-previous" ]; then cp -r "$RUNNER_TEMP/westchester-previous" web/site/westchester/data; fi
+          fi
+      - name: Keep the Westchester data for the next run
+        if: hashFiles('web/site/westchester/data/manifest.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: web/site/westchester/data
+          key: westchester-${{ github.run_id }}
       - name: Say which data is published
         run: |
           node -e 'const m = require("./web/site/data/manifest.json"); console.log(`Published ${m.row_count} requests. ${m.scope.sentence} Snapshot ${m.snapshot_hash.slice(0, 16)}.`)' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f web/site/westchester/data/manifest.json ]; then
+            node -e 'const m = require("./web/site/westchester/data/manifest.json"); console.log(`Westchester: ${m.row_count} requests. ${m.scope.sentence} Snapshot ${m.snapshot_hash.slice(0, 16)}.`)' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::No Westchester data to publish; the Westchester page will say so."
+          fi
+          if [ "${{ steps.westchester.outcome }}" != success ]; then
+            echo "::warning::Couldn't fetch the Westchester towns' requests; publishing the previous data, if any."
+          fi
           if [ "${{ steps.refresh.outcome }}" != success ]; then
             echo "::warning::Couldn't fetch a recent month; publishing the committed one."
           fi

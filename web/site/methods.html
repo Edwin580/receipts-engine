@@ -29,6 +29,10 @@
   <p><b>Complaints closed before they were opened</b> are left out. These are data entry errors; the main page says how many there were.</p>
   <p><b>One period.</b> The site currently loads one month of complaints so that it stays quick on a phone. Seasonal complaints, like heat in winter or fireworks in summer, only show up in their season.</p>
 
+  <h2>Westchester towns</h2>
+  <p>The <a href="westchester/">Westchester page</a> uses the public records of the towns that take residents' requests through SeeClickFix: Mount Pleasant, Greenburgh, Mount Vernon, North Castle and Peekskill. A request's town is the SeeClickFix organization that handles it; Mount Vernon's requests are filed under its departments' names. Times are New York local time. The page covers the latest twelve full months that ended at least 30 days before the site was built, and is refreshed monthly.</p>
+  <p>These are far fewer requests than New York City's, about 1,500 a year across the five towns, so comparisons for less common request types rest on a handful of requests; the page says when there are fewer than 20. Yonkers takes requests through its own Problem Solver form and the Mayor's Help Line, which don't publish their records, so it isn't included.</p>
+
   <h2>How it is computed</h2>
   <p>Everything is computed in your browser. The page downloads a snapshot of the city's data and a query engine compiled to WebAssembly, then runs each question as a small query: filter to the complaint type, filter to the area, keep closed complaints, compute the hours each took, take the median. "How this was counted" on the main page lists those steps with the number of complaints left after each one. The sentences there are generated from the query the engine ran, not written separately.</p>
   <p>The engine keeps track of which complaints each result came from. That is how the page lists the actual complaints behind an answer, and how it can say how much any single complaint moves the answer: it computes the median without each complaint, exactly, without re-running the whole query.</p>

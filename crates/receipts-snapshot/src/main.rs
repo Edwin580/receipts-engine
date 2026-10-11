@@ -60,8 +60,10 @@ enum Command {
     },
     /// Re-derive every hash in a snapshot directory and compare with its manifest.
     Verify { dir: PathBuf },
-    /// Write a synthetic 311-like raw directory (for tests and benchmarks).
+    /// Write a synthetic raw directory (for tests and benchmarks).
     Synth {
+        #[arg(long, default_value = "nyc311")]
+        source: String,
         #[arg(long)]
         out: PathBuf,
         #[arg(long)]
@@ -149,6 +151,7 @@ fn main() -> Result<()> {
             );
         }
         Command::Synth {
+            source,
             out,
             rows,
             seed,
@@ -156,16 +159,28 @@ fn main() -> Result<()> {
             to,
             page_size,
         } => {
-            let scope = Scope::from_dates(NYC_311.created_field(), &from, &to)?;
-            let records = synth::Generator311::new(seed, &scope).take(rows);
-            let meta = synth::metadata_for(&NYC_311, 1_768_435_200);
-            let rec = synth::write_raw(
-                &out,
-                &NYC_311,
-                &scope,
-                &meta,
-                synth::stream_pages(records, page_size),
-            )?;
+            let spec = dataset(&source)?;
+            let scope = Scope::from_dates(spec.created_field(), &from, &to)?;
+            let meta = synth::metadata_for(spec, 1_768_435_200);
+            let rec = if std::ptr::eq(spec, &WESTCHESTER_SCF) {
+                let records = synth::generate_westchester(rows, seed, &scope);
+                synth::write_raw(
+                    &out,
+                    spec,
+                    &scope,
+                    &meta,
+                    synth::paginate(&records, page_size),
+                )?
+            } else {
+                let records = synth::Generator311::new(seed, &scope).take(rows);
+                synth::write_raw(
+                    &out,
+                    spec,
+                    &scope,
+                    &meta,
+                    synth::stream_pages(records, page_size),
+                )?
+            };
             println!(
                 "wrote {} synthetic records in {} pages to {}",
                 rec.raw_records,

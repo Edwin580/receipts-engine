@@ -15,6 +15,11 @@ of the city's open data (currently July 2025, 315,883 complaints); there is
 no server and no account. What the numbers mean and what they leave out is
 on the [methods page](https://edwin580.github.io/receipts-engine/methods.html).
 
+A second page, [Westchester towns](https://edwin580.github.io/receipts-engine/westchester/),
+does the same for the five towns that take requests through SeeClickFix
+(Mount Pleasant, Greenburgh, Mount Vernon, North Castle, Peekskill), from
+its public records. Yonkers doesn't publish its records, so it isn't there.
+
 Under the site is a small query engine, written in Rust and compiled to
 WebAssembly, that keeps track of which source rows every result came from.
 That is what lets the page list the complaints behind an answer and say

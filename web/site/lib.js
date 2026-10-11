@@ -41,6 +41,7 @@ export function areaName(area, withArticle = false) {
     case "borough": return boroughName(area.value, withArticle);
     case "district": return districtName(area.value);
     case "zip": return `ZIP ${area.value}`;
+    case "town": return area.value;
     default: throw new Error(`unknown area ${area.kind}`);
   }
 }
@@ -54,12 +55,12 @@ export function parseAreaKey(key) {
   const i = key.indexOf(":");
   const kind = key.slice(0, i);
   const value = key.slice(i + 1);
-  if (!["borough", "district", "zip"].includes(kind) || !value) return { kind: "city" };
+  if (!["borough", "district", "zip", "town"].includes(kind) || !value) return { kind: "city" };
   if (kind === "zip" && !/^\d{5}$/.test(value)) return { kind: "city" };
   return { kind, value };
 }
 
-const AREA_COLUMN = { borough: "borough", district: "community_board", zip: "incident_zip" };
+const AREA_COLUMN = { borough: "borough", district: "community_board", zip: "incident_zip", town: "town" };
 
 const eq = (column, value) => ({ call: "eq", args: [{ column }, { literal: { str: value } }] });
 
@@ -112,6 +113,22 @@ const TIME_AGGREGATES = [
 /** One row: how many closed complaints, the median hours to close, and the 90th percentile. */
 export function waitPlan(snapshot, q) {
   return closed(snapshot, q).add({ op: "aggregate", group_by: [], aggregates: TIME_AGGREGATES }).done();
+}
+
+/** Westchester: the same for each town, slowest first. */
+export function townsPlan(snapshot, type) {
+  return closed(snapshot, { type, area: null })
+    .add({ op: "aggregate", group_by: ["town"], aggregates: TIME_AGGREGATES })
+    .add({ op: "sort", keys: [{ column: "median_hours", order: "desc" }] })
+    .done();
+}
+
+/** Plan for the town menu: requests per town, most first. */
+export function townListPlan(snapshot) {
+  return chain(snapshot)
+    .add({ op: "aggregate", group_by: ["town"], aggregates: [{ name: "n", fn: "count" }] })
+    .add({ op: "sort", keys: [{ column: "n", order: "desc" }, { column: "town", order: "asc" }] })
+    .done();
 }
 
 /**

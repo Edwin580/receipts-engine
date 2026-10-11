@@ -376,6 +376,71 @@ pub fn stream_pages(
     })
 }
 
+/// Synthetic Westchester requests: flat records with the source fields of
+/// `spec::WESTCHESTER_SCF`, roughly in the real mix of towns and types.
+/// For tests and for the site's CI, which can't fetch SeeClickFix.
+pub fn generate_westchester(n: usize, seed: u64, scope: &Scope) -> Vec<Value> {
+    let (lo, hi) = scope.bounds().expect("valid scope");
+    let span_secs = ((hi - lo) / MICROS_PER_SECOND) as u64;
+    let mut rng = Rng::new(seed);
+    let towns = Categorical::new(
+        labels(&[
+            "Mount Pleasant",
+            "Mount Vernon",
+            "Greenburgh",
+            "North Castle",
+            "Peekskill",
+        ]),
+        1.2,
+    );
+    let types = Categorical::new(
+        labels(&[
+            "Potholes",
+            "Trees",
+            "Overgrown Brush",
+            "Catch Basins/Storm Drains",
+            "Road Repairs",
+            "Sewers - Sewage Backup",
+            "Traffic Signal Issue",
+            "Snow/Ice",
+            "Street Light Out",
+            "Report Distressed Property",
+            "Missed Garbage Pickup",
+            "Abandoned Vehicle on Streets",
+        ]),
+        1.0,
+    );
+    let zips = [
+        "10570", "10594", "10595", "10532", "10550", "10552", "10530", "10603", "10504", "10566",
+    ];
+    let ts = |t: i64| format_naive_timestamp(t)[..19].to_string();
+    (0..n)
+        .map(|i| {
+            let created = lo + (rng.below(span_secs) as i64) * MICROS_PER_SECOND;
+            // Most close within days; some take months; a quarter stay open.
+            let closed = rng.chance(0.75).then(|| {
+                let hours = if rng.chance(0.8) {
+                    rng.f64() * 96.0
+                } else {
+                    96.0 + rng.f64() * 2000.0
+                };
+                created + (hours * 3_600_000_000.0) as i64
+            });
+            json!({
+                "id": (19_000_000 + i as u64 * 7).to_string(),
+                "created_at": ts(created),
+                "closed_at": closed.map(ts),
+                "town": towns.sample(&mut rng),
+                "request_type": types.sample(&mut rng),
+                "status": if closed.is_some() { "Closed" } else { "Open" },
+                "zip": zips[rng.below(zips.len() as u64) as usize],
+                "lat": format!("{:.6}", 40.95 + rng.f64() * 0.35),
+                "lng": format!("{:.6}", -73.95 + rng.f64() * 0.3),
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
