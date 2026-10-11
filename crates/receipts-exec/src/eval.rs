@@ -279,6 +279,11 @@ pub(crate) fn materialize(d: Datum, n: usize, name: &str) -> Column {
     crate::table::renamed(col, name)
 }
 
+/// Value `i` of a true/false datum, `None` if missing.
+pub(crate) fn bool_at(d: &Datum, i: usize) -> Option<bool> {
+    get_bool(d)(i)
+}
+
 /// Rows where the predicate is true (missing counts as not true).
 pub(crate) fn selection(d: &Datum, n: usize) -> Vec<u32> {
     let g = get_bool(d);

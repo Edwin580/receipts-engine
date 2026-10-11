@@ -60,6 +60,25 @@ impl Execution {
     }
 }
 
+/// Whether `predicate` holds for row `row` of `table`: `Some(true)`,
+/// `Some(false)`, or `None` when it can't be decided because a value is
+/// missing. Used to say why a filter dropped a row.
+pub fn predicate_on_row(
+    table: &Table,
+    predicate: &receipts_plan::Expr,
+    row: u32,
+) -> Result<Option<bool>, String> {
+    if row as usize >= table.len() {
+        return Err(format!(
+            "row {row} is past the table's {} rows",
+            table.len()
+        ));
+    }
+    let one = table.gather(&[row]);
+    let d = Evaluator { table: &one }.eval(predicate)?;
+    Ok(eval::bool_at(&d, 0))
+}
+
 pub fn execute(plan: &ValidPlan, sources: &dyn SourceProvider) -> Result<Execution, ExecError> {
     execute_inner(plan, sources, None)
 }
