@@ -162,10 +162,13 @@ function lookUp(key) {
 test("looking up a complaint finds it, counts it, or says why not", () => {
   assert.equal(lookUp("1"), null);
 
-  const counted = lookUp("65671892");
+  // Any month: take the slowest closed complaint of the most common type.
+  const [slowest] = rows(listPlan(S, { type: types[0], area: { kind: "city" } }, "slowest", 1));
+  const key = String(slowest[0]);
+  const counted = lookUp(key);
   assert.equal(counted.ids.length, 1);
-  assert.equal(counted.rec.unique_key, 65671892);
-  assert.deepEqual(counted.q, { type: "Noise - Residential", area: { kind: "district", value: "04 BRONX" } });
+  assert.equal(String(counted.rec.unique_key), key);
+  assert.equal(counted.q.type, types[0]);
   assert.equal(counted.why, null);
   assert.equal(counted.trace.output_row, 0);
 
@@ -191,7 +194,7 @@ test("looking up a complaint finds it, counts it, or says why not", () => {
     { op: "filter", input: 0, predicate: { call: "lt", args: [{ column: "closed_date" }, { column: "created_date" }] } },
     { op: "limit", input: 1, count: "3" },
   ], output: 2 });
-  assert.ok(backwards.length > 0);
+  // A month may have none of these; the July 2025 snapshot has 64.
   for (const row of backwards) assert.equal(lookUp(String(row[0])).why, "backwards");
 });
 
