@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  waitPlan, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan, ORDERS,
+  waitPlan, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan, ORDERS, keyPlan, fasterPlan, questionFor, whyNotCounted,
   parseDistrict, districtName, boroughName, areaName, areaKey, parseAreaKey, rankOf, ordinal,
   fmtInt, fmtDuration, fmtWhen, hoursBetween, periodName, typeName, shortHash,
 } from "../lib.js";
@@ -118,4 +118,25 @@ test("formatting", () => {
   assert.equal(typeName("HEAT/HOT WATER"), "Heat/Hot Water");
   assert.equal(typeName("Noise - Residential"), "Noise - Residential");
   assert.equal(shortHash("a".repeat(64)), "aaaaaaaaaaaa…");
+});
+
+test("looking up a complaint: number checks, its question, and why it isn't counted", () => {
+  assertChain(keyPlan(S, "65671892"));
+  assertChain(fasterPlan(S, { type: "Rodent", area: AREAS[2] }, 3.5));
+  assert.deepEqual(keyPlan(S, "007").nodes[1].predicate.args[1], { literal: { i64: "7" } });
+  for (const bad of ["", "1e5", "-3", "12 34", "1234567890123456789"]) assert.throws(() => keyPlan(S, bad), /not a complaint number/);
+
+  const rec = (complaint_type, community_board, borough) => ({ complaint_type, community_board, borough });
+  assert.deepEqual(questionFor(rec("Rodent", "04 BRONX", "BRONX")), { type: "Rodent", area: { kind: "district", value: "04 BRONX" } });
+  assert.deepEqual(questionFor(rec("Rodent", "55 BROOKLYN", "BROOKLYN")), { type: "Rodent", area: { kind: "borough", value: "BROOKLYN" } });
+  assert.deepEqual(questionFor(rec("Rodent", "0 Unspecified", "Unspecified")), { type: "Rodent", area: { kind: "city" } });
+
+  const plan = waitPlan(S, { type: "Rodent", area: AREAS[2] });
+  const at = (op) => plan.nodes.findIndex((n) => n.predicate?.call === op);
+  const filter = (step, value) => ({ step, sentence: "", reason: { kind: "filter", value } });
+  assert.equal(whyNotCounted(plan, null), null);
+  assert.equal(whyNotCounted(plan, filter(at("not"), false)), "open");
+  assert.equal(whyNotCounted(plan, filter(at("ge"), null)), "backwards");
+  assert.equal(whyNotCounted(plan, filter(1, false)), "elsewhere");
+  assert.equal(whyNotCounted(plan, { step: 0, sentence: "", reason: { kind: "excluded" } }), "other");
 });

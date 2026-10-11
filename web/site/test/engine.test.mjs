@@ -8,6 +8,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   BOROUGHS, waitPlan, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan, ORDERS, parseDistrict, hoursBetween,
+  keyPlan, fasterPlan, questionFor, whyNotCounted,
 } from "../lib.js";
 
 const site = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -142,6 +143,58 @@ test("leaving out one complaint gives what a fresh query without it gives", () =
 // The fingerprint covers the values, not the file's bytes: a change that
 // alters no value (alignment padding, say) loads and re-derives the same
 // fingerprint. Anything else is refused with a sentence, never a crash.
+/** What the page does for "Check it": the record, its question, and where it stands. */
+function lookUp(key) {
+  const r = run(keyPlan(S, key));
+  const ids = engine.traceBackRows(r.execution, 0);
+  engine.dropExecution(r.execution);
+  if (ids.length === 0) return null;
+  const recs = JSON.parse(engine.sourceRecords(S, ids));
+  const rec = Object.fromEntries(recs.columns.map((c, i) => [c, recs.rows[0][i]]));
+  const q = questionFor(rec);
+  const plan = waitPlan(S, q);
+  const w = run(plan);
+  const trace = JSON.parse(engine.traceForward(w.execution, ids[0]));
+  engine.dropExecution(w.execution);
+  return { ids, rec, q, trace, why: whyNotCounted(plan, trace.dropped), closed: w.output.rows[0][0] };
+}
+
+test("looking up a complaint finds it, counts it, or says why not", () => {
+  assert.equal(lookUp("1"), null);
+
+  const counted = lookUp("65671892");
+  assert.equal(counted.ids.length, 1);
+  assert.equal(counted.rec.unique_key, 65671892);
+  assert.deepEqual(counted.q, { type: "Noise - Residential", area: { kind: "district", value: "04 BRONX" } });
+  assert.equal(counted.why, null);
+  assert.equal(counted.trace.output_row, 0);
+
+  // "N of them were closed faster" matches the complaints themselves.
+  const hours = hoursBetween(counted.rec.created_date, counted.rec.closed_date);
+  const faster = rows(fasterPlan(S, counted.q, hours))[0][0];
+  const w = run(waitPlan(S, counted.q));
+  const recs = JSON.parse(engine.sourceRecords(S, engine.traceBackRows(w.execution, 0)));
+  engine.dropExecution(w.execution);
+  const c = (n) => recs.columns.indexOf(n);
+  const all = recs.rows.map((row) => hoursBetween(row[c("created_date")], row[c("closed_date")]));
+  assert.equal(faster, all.filter((h) => h < hours).length);
+
+  // Still open, and closed before it was filed.
+  const open = rows({ format: "receipts-plan/1", nodes: [
+    { op: "scan", snapshot: S },
+    { op: "filter", input: 0, predicate: { call: "is_null", args: [{ column: "closed_date" }] } },
+    { op: "limit", input: 1, count: "3" },
+  ], output: 2 });
+  for (const row of open) assert.equal(lookUp(String(row[0])).why, "open");
+  const backwards = rows({ format: "receipts-plan/1", nodes: [
+    { op: "scan", snapshot: S },
+    { op: "filter", input: 0, predicate: { call: "lt", args: [{ column: "closed_date" }, { column: "created_date" }] } },
+    { op: "limit", input: 1, count: "3" },
+  ], output: 2 });
+  assert.ok(backwards.length > 0);
+  for (const row of backwards) assert.equal(lookUp(String(row[0])).why, "backwards");
+});
+
 test("a changed byte is refused, or changed no value", () => {
   const n = files[1].length;
   let refused = 0;
