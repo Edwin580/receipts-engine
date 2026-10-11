@@ -5,7 +5,7 @@
 
 import init, { Engine } from "./pkg/receipts_wasm.js";
 import {
-  BOROUGHS, MIN_RANKED, waitPlan, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan,
+  BOROUGHS, MIN_RANKED, waitPlan, keyPlan, fasterPlan, questionFor, whyNotCounted, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan,
   parseDistrict, districtName, boroughName, areaName, areaKey, parseAreaKey, rankOf, ordinal,
   fmtInt, fmtDuration, fmtWhen, hoursBetween, periodName, typeName, shortHash,
 } from "./lib.js";
@@ -30,6 +30,7 @@ const state = {
   engine: null,
   snapshot: null,
   period: "",
+  fetchedAt: "",
   q: { type: null, area: { kind: "city" } },
   order: "slowest",
   list: [],
@@ -98,6 +99,7 @@ async function load() {
   const m = JSON.parse(manifest);
   const [from, to] = m.scope.sentence.match(/\d{4}-\d{2}-\d{2}/g) ?? [];
   state.period = from && to ? periodName(from, to) : "";
+  state.fetchedAt = m.fetch.finished_at;
   $("data-line").textContent =
     `${fmtInt(report.rows)} complaints filed in ${state.period}, downloaded from the city on ${m.fetch.finished_at.slice(0, 10)}. ` +
     `Before using them, this page checked the download against its published fingerprint (${shortHash(report.snapshot_hash)}).`;
@@ -122,8 +124,9 @@ async function load() {
   }
   areaSel.append(el("option", { value: "zip" }, "a ZIP code"));
 
-  typeSel.addEventListener("change", () => { state.q.type = typeSel.value; answer(); });
+  typeSel.addEventListener("change", () => { $("yours").hidden = true; state.q.type = typeSel.value; answer(); });
   areaSel.addEventListener("change", () => {
+    $("yours").hidden = true;
     if (areaSel.value === "zip") {
       $("zip-wrap").hidden = false;
       $("zip").focus();
@@ -140,12 +143,77 @@ async function load() {
   });
   $("order").addEventListener("change", () => { state.order = $("order").value; listComplaints(); fitSelects(); });
   $("more").addEventListener("click", showMore);
+  $("lookup").addEventListener("submit", (ev) => { ev.preventDefault(); lookUp($("key").value); });
 
   typeSel.disabled = false;
   areaSel.disabled = false;
+  $("lookup").hidden = false;
   setStatus("");
   answer();
   document.fonts?.ready.then(fitSelects);
+}
+
+/** Points the menus at `q`, adding its type if the menu doesn't list it. */
+function setQuestion(q) {
+  const typeSel = $("type");
+  if (![...typeSel.options].some((o) => o.value === q.type)) {
+    typeSel.append(el("option", { value: q.type }, typeName(q.type)));
+  }
+  typeSel.value = q.type;
+  state.q.type = q.type;
+  setArea(q.area);
+}
+
+/** "Check it": find the complaint, switch to its question, say where it stands. */
+function lookUp(raw) {
+  const out = $("yours");
+  out.hidden = false;
+  const key = raw.trim().replace(/^#/, "");
+  if (!/^\d{1,18}$/.test(key)) {
+    out.replaceChildren(el("p", {}, "A complaint number is all digits, like 65671892."));
+    return;
+  }
+  const found = run(keyPlan(state.snapshot, key));
+  const ids = state.engine.traceBackRows(found.execution, 0);
+  state.engine.dropExecution(found.execution);
+  if (ids.length === 0) {
+    out.replaceChildren(el("p", {}, `Complaint #${key} isn't in this data, which covers complaints filed in ${state.period}.`));
+    return;
+  }
+  const recs = JSON.parse(state.engine.sourceRecords(state.snapshot, ids.subarray(0, 1)));
+  const rec = Object.fromEntries(recs.columns.map((c, i) => [c, recs.rows[0][i]]));
+  const q = questionFor(rec);
+  setQuestion(q);
+
+  // Where it stands in the answer now on the page.
+  const plan = waitPlan(state.snapshot, q);
+  const wait = run(plan);
+  const trace = JSON.parse(state.engine.traceForward(wait.execution, ids[0]));
+  const closed = wait.output.rows[0][0];
+  state.engine.dropExecution(wait.execution);
+
+  const what = el("p", {},
+    el("a", { class: "key", href: CITY_RECORD(rec.unique_key), title: "The city's record for this complaint" }, `#${rec.unique_key}`),
+    ` ${rec.descriptor ?? typeName(rec.complaint_type)}, ${areaName(q.area, true)}. Filed ${fmtWhen(rec.created_date)}` +
+    (rec.closed_date ? `, closed ${fmtWhen(rec.closed_date)}.` : "."));
+  const why = whyNotCounted(plan, trace.dropped);
+  let verdict;
+  if (!why) {
+    const hours = hoursBetween(rec.created_date, rec.closed_date);
+    const faster = rows(fasterPlan(state.snapshot, q, hours))[0][0];
+    // Counts, not a rounded percentage: 861 of 862 is not "100%".
+    verdict = `It took ${fmtDuration(hours)}, and it is one of the ${fmtInt(closed)} complaints counted above. ` +
+      (faster === 0 ? "None of them was closed faster." : `${fmtInt(faster)} of them were closed faster.`);
+  } else if (why === "open") {
+    // The download time is UTC and the filed time NYC local, so "about".
+    const open = hoursBetween(rec.created_date, state.fetchedAt.replace("Z", ""));
+    verdict = `It had no closed date when the data was downloaded on ${state.fetchedAt.slice(0, 10)}, about ${fmtDuration(open)} after it was filed, so it isn't counted above. Complaints still open are left out of every answer on this page.`;
+  } else if (why === "backwards") {
+    verdict = "Its closed date is earlier than its filed date, so it's left out of the count above as a data error.";
+  } else {
+    verdict = `It isn't counted above. The step that left it out: ${trace.dropped.sentence}`;
+  }
+  out.replaceChildren(what, el("p", {}, verdict));
 }
 
 function setArea(area) {

@@ -151,6 +151,50 @@ export function listPlan(snapshot, q, order, n) {
     .done();
 }
 
+/** One row whose trace is the snapshot row with this complaint number (none if absent). */
+export function keyPlan(snapshot, uniqueKey) {
+  if (!/^\d{1,18}$/.test(String(uniqueKey))) throw new Error(`"${uniqueKey}" is not a complaint number`);
+  return chain(snapshot)
+    .filter({ call: "eq", args: [{ column: "unique_key" }, { literal: { i64: String(BigInt(uniqueKey)) } }] })
+    .add({ op: "aggregate", group_by: [], aggregates: [{ name: "n", fn: "count" }] })
+    .done();
+}
+
+/** One row: how many of the question's closed complaints took less than `hours`. */
+export function fasterPlan(snapshot, q, hours) {
+  return closed(snapshot, q)
+    .filter({ call: "lt", args: [{ column: "hours_to_close" }, { literal: { f64: hours } }] })
+    .add({ op: "aggregate", group_by: [], aggregates: [{ name: "n", fn: "count" }] })
+    .done();
+}
+
+/**
+ * The question a complaint belongs to: its type, and its community
+ * district, or its borough if the district isn't one, or citywide.
+ */
+export function questionFor(record) {
+  const area = parseDistrict(record.community_board) ? { kind: "district", value: record.community_board }
+    : BOROUGHS.includes(record.borough) ? { kind: "borough", value: record.borough }
+    : { kind: "city" };
+  return { type: record.complaint_type, area };
+}
+
+/**
+ * Why a complaint isn't counted, from the step of `waitPlan` that dropped
+ * it (traceForward's `dropped`), in words. `null` if it is counted.
+ */
+export function whyNotCounted(plan, dropped) {
+  if (!dropped) return null;
+  const node = plan.nodes[dropped.step];
+  const p = node.predicate;
+  if (dropped.reason.kind === "filter" && p) {
+    if (p.call === "not" && p.args[0].call === "is_null" && p.args[0].args[0].column === "closed_date") return "open";
+    if (p.call === "ge" && p.args[0].column === "closed_date") return "backwards";
+    if (p.call === "eq") return "elsewhere";
+  }
+  return "other";
+}
+
 /** Plan for the complaint-type menu: the most common types, most first. */
 export function topTypesPlan(snapshot, n) {
   return chain(snapshot)
