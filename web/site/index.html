@@ -36,6 +36,13 @@
     <p id="context"></p>
     <p class="caption" id="caveats"></p>
   </div>
+
+  <form id="lookup" class="lookup" hidden>
+    <label for="key">Filed one yourself? Enter its complaint number:</label>
+    <input id="key" type="text" inputmode="numeric" autocomplete="off" placeholder="65671892" aria-describedby="yours">
+    <button type="submit">Check it</button>
+  </form>
+  <div id="yours" class="yours" aria-live="polite" hidden></div>
 </section>
 
 <section id="compare-section" hidden>

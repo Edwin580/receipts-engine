@@ -133,6 +133,12 @@ button.text { border: 0; padding: 0; color: var(--accent); text-decoration: unde
 @media (max-width: 30rem) { .result .tailcol { display: none; } }
 @media (max-width: 34rem) { .headline { font-size: 1.4rem; } }
 .ask.small { font-size: 1rem; }
+.lookup { margin: 1.4rem 0 .4rem; font-size: .95rem; }
+.lookup label { display: block; color: var(--muted); margin-bottom: .2rem; }
+.lookup input { width: 9.5em; background: transparent; border: 0; border-bottom: 1px dotted var(--accent); color: var(--accent); font-family: var(--mono); font-size: .9rem; padding: .1rem .1em; border-radius: 0; margin-right: .5rem; }
+.yours { border-left: 2px solid var(--accent); padding: .2rem 0 .2rem .8rem; margin: .6rem 0 1rem; }
+.yours p { margin: 0 0 .4rem; }
+.yours .meta { color: var(--muted); font-size: .85rem; }
 #zip { width: 4.2em; background: transparent; border: 0; border-bottom: 1px dotted var(--accent); color: var(--accent); padding: 0 .1em; border-radius: 0; }
 .result td.few { color: var(--muted); }
 
