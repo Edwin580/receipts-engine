@@ -65,6 +65,7 @@ h1 { font-weight: normal; font-size: 2.6rem; line-height: 1.1; margin: 0 0 .6rem
 h2 { font-weight: normal; font-style: italic; font-size: 1.6rem; line-height: 1.2; margin: 3.2rem 0 .8rem; }
 h3 { font-weight: normal; font-style: italic; font-size: 1.25rem; margin: 2rem 0 .4rem; }
 p { margin: 0 0 1rem; }
+.intro { color: var(--muted); font-size: .95rem; margin-bottom: 1.6rem; }
 .subtitle { font-style: italic; font-size: 1.3rem; line-height: 1.35; margin-bottom: 1.6rem; }
 
 a { color: inherit; text-decoration-color: var(--muted); text-underline-offset: .15em; }
