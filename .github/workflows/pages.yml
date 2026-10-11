@@ -1,10 +1,20 @@
-# Publishes the demo page (web/site) to GitHub Pages: builds the single
-# threaded WASM package, runs the page's tests, uploads web/site.
+# Publishes the site (web/site) to GitHub Pages: builds the single
+# threaded WASM package, runs the site tests, fetches a recent month of
+# data from the city, and uploads web/site. Runs on every push to main and
+# once a month, so the data stays current without being committed. If the
+# fetch fails, or the site tests fail on the new month, it publishes the
+# month committed in web/site/data instead.
 name: pages
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: "23 7 3 * *"
   workflow_dispatch:
+    inputs:
+      month:
+        description: "Month to publish, YYYY-MM (default: latest month that ended 30+ days ago)"
+        required: false
 permissions:
   contents: read
   pages: write
@@ -25,6 +35,29 @@ jobs:
         run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked
       - run: tools/wasm/build.sh site
       - run: node --test web/site/test/*.test.mjs
+      - name: Fetch a recent month from the city
+        id: refresh
+        continue-on-error: true
+        env:
+          SOCRATA_APP_TOKEN: ${{ secrets.SOCRATA_APP_TOKEN }}
+          MONTH: ${{ inputs.month }}
+        run: tools/site/refresh-data.sh "$RUNNER_TEMP/fresh"
+      - name: Use it if the site tests pass on it
+        if: steps.refresh.outcome == 'success'
+        run: |
+          cp -r web/site/data "$RUNNER_TEMP/committed"
+          cp "$RUNNER_TEMP"/fresh/* web/site/data/
+          if ! node --test web/site/test/*.test.mjs; then
+            echo "::warning::The site tests fail on the new month; publishing the committed one."
+            rm -rf web/site/data
+            cp -r "$RUNNER_TEMP/committed" web/site/data
+          fi
+      - name: Say which data is published
+        run: |
+          node -e 'const m = require("./web/site/data/manifest.json"); console.log(`Published ${m.row_count} requests. ${m.scope.sentence} Snapshot ${m.snapshot_hash.slice(0, 16)}.`)' >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.refresh.outcome }}" != success ]; then
+            echo "::warning::Couldn't fetch a recent month; publishing the committed one."
+          fi
       - name: Leave tests out of the published site
         run: rm -rf web/site/test
       - uses: actions/upload-pages-artifact@v4.0.0
