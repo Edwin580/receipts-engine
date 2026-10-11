@@ -164,7 +164,7 @@ function answer() {
   const where = areaName(q.area, true);
 
   const wait = run(waitPlan(snapshot, q));
-  const [closed, median] = wait.output.rows[0];
+  const [closed, median, p90] = wait.output.rows[0];
   const [filed, withDate] = rows(countsPlan(snapshot, q))[0];
   const stillOpen = filed - withDate;
   const backwards = withDate - closed;
@@ -178,6 +178,8 @@ function answer() {
     $("headline").replaceChildren(
       el("span", { class: "lead" }, `${what} complaints in ${where}, ${state.period}`),
       "Half were closed within ", el("b", {}, fmtDuration(median)), ".",
+      // replaceChildren would print a null, so leave the line out instead.
+      ...(closed >= 10 ? [el("span", { class: "tail" }, "9 in 10 were closed within ", el("b", {}, fmtDuration(p90)), ".")] : []),
     );
   }
 
@@ -185,7 +187,7 @@ function answer() {
   const ctx = [];
   if (closed > 0 && q.area.kind !== "city") {
     const city = rows(waitPlan(snapshot, { type: q.type, area: { kind: "city" } }))[0];
-    ctx.push(`Citywide, half were closed within ${fmtDuration(city[1])}.`);
+    ctx.push(`Citywide, half were closed within ${fmtDuration(city[1])}, and 9 in 10 within ${fmtDuration(city[2])}.`);
   }
   const borough = q.area.kind === "borough" ? q.area.value
     : q.area.kind === "district" ? parseDistrict(q.area.value)?.borough : null;
@@ -238,7 +240,7 @@ function renderCompare(cmp, borough) {
   $("compare-caption").textContent = `${typeName(state.q.type)} complaints, slowest first. Pick one to see it.`;
   const max = Math.max(...shown.map((r) => r[2])) || 1;
   const current = state.q.area.kind === "district" || state.q.area.kind === "borough" ? state.q.area.value : null;
-  $("compare").tBodies[0].replaceChildren(...shown.map(([g, n, m]) => {
+  $("compare").tBodies[0].replaceChildren(...shown.map(([g, n, m, p90]) => {
     const area = byDistrict ? { kind: "district", value: g } : { kind: "borough", value: g };
     const few = n < MIN_RANKED;
     return el("tr", { class: g === current ? "selected" : "" },
@@ -246,6 +248,7 @@ function renderCompare(cmp, borough) {
         byDistrict ? districtName(g) : boroughName(g))),
       el("td", { class: "num" }, fmtInt(n)),
       el("td", few ? { class: "num few", title: "Too few complaints to rank" } : { class: "num" }, fmtDuration(m)),
+      el("td", { class: few ? "num few tailcol" : "num tailcol" }, n >= 10 ? fmtDuration(p90) : ""),
       el("td", { class: "bar", "aria-hidden": "true" }, el("span", { style: `width:${(100 * m / max).toFixed(1)}%` })),
     );
   }));
