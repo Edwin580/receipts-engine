@@ -3,6 +3,8 @@
 //! ```text
 //! receipts-snapshot fetch  --out raw/nyc311           # Socrata -> raw directory
 //! receipts-snapshot build  --raw raw/nyc311 --out snapshots/nyc311
+//! receipts-snapshot fetch  --source westchester --out raw/wch --from 2025-01-01 --to 2026-01-01
+//! receipts-snapshot build  --source westchester --raw raw/wch --out snapshots/wch
 //! receipts-snapshot verify snapshots/nyc311/<hash16>
 //! receipts-snapshot synth  --out raw/synth --rows 1000000   # benchmarks without the network
 //! ```
@@ -11,14 +13,15 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use receipts_snapshot::arrow_io::Compression;
 use receipts_snapshot::raw::Scope;
+use receipts_snapshot::seeclickfix::{self, ScfOptions};
 use receipts_snapshot::socrata::{self, FetchOptions, UreqTransport};
-use receipts_snapshot::spec::NYC_311;
+use receipts_snapshot::spec::{DatasetSpec, NYC_311, WESTCHESTER_SCF};
 use receipts_snapshot::{assemble, synth, verify};
 use std::path::PathBuf;
 use std::time::Instant;
 
 #[derive(Parser)]
-#[command(version = receipts_snapshot::TOOL_VERSION, about = "Build content-hashed snapshots of NYC 311 data")]
+#[command(version = receipts_snapshot::TOOL_VERSION, about = "Build content-hashed snapshots of service-request data")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -26,8 +29,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Fetch raw pages from the Socrata API. Reads SOCRATA_APP_TOKEN if set.
+    /// Fetch raw pages: NYC 311 from the Socrata API (reads SOCRATA_APP_TOKEN
+    /// if set), or Westchester towns from SeeClickFix.
     Fetch {
+        #[arg(long, default_value = "nyc311")]
+        source: String,
         #[arg(long)]
         out: PathBuf,
         /// First day in scope (inclusive), YYYY-MM-DD.
@@ -41,6 +47,8 @@ enum Command {
     },
     /// Clean a raw directory into a snapshot under <out>/<hash16>/.
     Build {
+        #[arg(long, default_value = "nyc311")]
+        source: String,
         #[arg(long)]
         raw: PathBuf,
         #[arg(long)]
@@ -69,29 +77,40 @@ enum Command {
     },
 }
 
+/// The dataset for `--source`.
+fn dataset(source: &str) -> Result<&'static DatasetSpec> {
+    match source {
+        "nyc311" => Ok(&NYC_311),
+        "westchester" => Ok(&WESTCHESTER_SCF),
+        other => anyhow::bail!("unknown source {other:?}: use nyc311 or westchester"),
+    }
+}
+
 fn main() -> Result<()> {
     let start = Instant::now();
     match Cli::parse().command {
         Command::Fetch {
+            source,
             out,
             from,
             to,
             page_size,
         } => {
-            let scope = Scope::from_dates(NYC_311.created_field(), &from, &to)?;
-            let mut opts = FetchOptions::new(&NYC_311, scope);
-            opts.page_size = page_size;
-            let token = std::env::var("SOCRATA_APP_TOKEN")
-                .ok()
-                .filter(|t| !t.is_empty());
-            let mut transport = UreqTransport::new(token);
-            let rec = socrata::fetch(
-                &NYC_311,
-                &opts,
-                &mut transport,
-                &mut std::thread::sleep,
-                &out,
-            )?;
+            let spec = dataset(&source)?;
+            let scope = Scope::from_dates(spec.created_field(), &from, &to)?;
+            let rec = if std::ptr::eq(spec, &WESTCHESTER_SCF) {
+                let opts = ScfOptions::new(spec, scope);
+                let mut transport = UreqTransport::new(None);
+                seeclickfix::fetch(spec, &opts, &mut transport, &mut std::thread::sleep, &out)?
+            } else {
+                let mut opts = FetchOptions::new(spec, scope);
+                opts.page_size = page_size;
+                let token = std::env::var("SOCRATA_APP_TOKEN")
+                    .ok()
+                    .filter(|t| !t.is_empty());
+                let mut transport = UreqTransport::new(token);
+                socrata::fetch(spec, &opts, &mut transport, &mut std::thread::sleep, &out)?
+            };
             println!(
                 "fetched {} records in {} pages into {}",
                 rec.raw_records,
@@ -100,16 +119,18 @@ fn main() -> Result<()> {
             );
         }
         Command::Build {
+            source,
             raw,
             out,
             compression,
         } => {
+            let spec = dataset(&source)?;
             let compression = match compression.as_str() {
                 "lz4" => Compression::Lz4,
                 "none" => Compression::None,
                 other => anyhow::bail!("unknown compression {other:?}: use lz4 or none"),
             };
-            let built = assemble::build_with(&NYC_311, &raw, &out, compression)?;
+            let built = assemble::build_with(spec, &raw, &out, compression)?;
             let m = &built.manifest;
             println!("snapshot {}", m.snapshot_hash);
             println!(

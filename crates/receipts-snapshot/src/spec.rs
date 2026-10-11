@@ -53,6 +53,18 @@ pub struct ColumnSpec {
     pub description: &'static str,
 }
 
+/// The area a dataset covers, as a loose box. Locations outside it are
+/// counted as a known issue, never dropped.
+#[derive(Clone, Copy, Debug)]
+pub struct Area {
+    /// Known-issue id, such as `KI-location-outside-nyc`.
+    pub issue_id: &'static str,
+    /// "New York City", used in the issue's sentence.
+    pub name: &'static str,
+    pub lat: (f32, f32),
+    pub lon: (f32, f32),
+}
+
 #[derive(Clone, Debug)]
 pub struct DatasetSpec {
     pub source_id: u16,
@@ -65,6 +77,7 @@ pub struct DatasetSpec {
     pub scope_sentence: &'static str,
     pub columns: &'static [ColumnSpec],
     pub excluded: &'static [(&'static str, &'static str)],
+    pub area: Area,
 }
 
 impl DatasetSpec {
@@ -140,6 +153,13 @@ pub static NYC_311: DatasetSpec = DatasetSpec {
     source_url: "https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2010-to-Present/erm2-nwe9",
     terms_url: "https://opendata.cityofnewyork.us/overview/#termsofuse",
     scope_sentence: "311 service requests created from {from} up to (not including) {to}, NYC local time.",
+    area: Area {
+        issue_id: "KI-location-outside-nyc",
+        name: "New York City",
+        // A loose bounding box around the five boroughs.
+        lat: (40.45, 40.95),
+        lon: (-74.30, -73.65),
+    },
     columns: &[
         col(
             "unique_key",
@@ -269,6 +289,98 @@ pub static NYC_311: DatasetSpec = DatasetSpec {
     ],
 };
 
+/// Westchester towns that take requests through SeeClickFix, by the
+/// SeeClickFix organization that handles them. Mount Vernon files requests
+/// under department names; their addresses are all in Mount Vernon. Requests
+/// from any other organization (Connecticut towns, unassigned) are left out
+/// of the snapshot and counted in the raw directory's `source.json`.
+pub const WESTCHESTER_TOWNS: &[(&str, &str)] = &[
+    ("Mount Pleasant, NY", "Mount Pleasant"),
+    ("Greenburgh, NY", "Greenburgh"),
+    ("Public Works Issues", "Mount Vernon"),
+    ("Housing Code Violations", "Mount Vernon"),
+    ("Operation Better Living", "Mount Vernon"),
+    ("North Castle, NY", "North Castle"),
+    ("Peekskill, NY", "Peekskill"),
+];
+
+/// SeeClickFix requests to Westchester towns. The source fields are the
+/// flattened record `seeclickfix::flatten` writes, not SeeClickFix's own
+/// nested JSON.
+pub static WESTCHESTER_SCF: DatasetSpec = DatasetSpec {
+    source_id: 2,
+    dataset: "SeeClickFix requests, Westchester towns",
+    portal: "seeclickfix.com",
+    dataset_id: "westchester-towns",
+    source_url: "https://seeclickfix.com/",
+    terms_url: "https://seeclickfix.com/terms",
+    scope_sentence: "SeeClickFix requests to Mount Pleasant, Greenburgh, Mount Vernon, North Castle and Peekskill created from {from} up to (not including) {to}, New York local time.",
+    area: Area {
+        issue_id: "KI-location-outside-westchester",
+        name: "Westchester County",
+        lat: (40.88, 41.37),
+        lon: (-73.99, -73.48),
+    },
+    columns: &[
+        col(
+            "unique_key",
+            Kind::Key,
+            &["id"],
+            "SeeClickFix's ID for this request; its page is seeclickfix.com/issues/<id>.",
+        ),
+        col(
+            "created_date",
+            Kind::CreatedTimestamp,
+            &["created_at"],
+            "When the request was made (New York local time).",
+        ),
+        col(
+            "closed_date",
+            Kind::Timestamp,
+            &["closed_at"],
+            "When the town marked the request closed (New York local time), exactly as published.",
+        ),
+        col(
+            "town",
+            Kind::Text,
+            &["town"],
+            "The town that handles the request, from its SeeClickFix organization.",
+        ),
+        col(
+            "complaint_type",
+            Kind::Text,
+            &["request_type"],
+            "The kind of problem reported, as the town's request categories name it.",
+        ),
+        col(
+            "status",
+            Kind::Text,
+            &["status"],
+            "Status of the request when the data was fetched: Open, Acknowledged, Closed or Archived.",
+        ),
+        col(
+            "incident_zip",
+            Kind::Text,
+            &["zip"],
+            "ZIP code from the request's address, if it has one.",
+        ),
+        col(
+            "location",
+            Kind::LatLon,
+            &["lat", "lng"],
+            "Where the problem was reported, as latitude/longitude.",
+        ),
+    ],
+    excluded: &[
+        ("summary", "Usually repeats the request type."),
+        ("description", "Free text written by the person reporting."),
+        ("address", "Free text address; the ZIP is kept."),
+        ("reporter", "Personal information."),
+        ("media", "Photos."),
+        ("acknowledged_at", "Not needed for wait times."),
+    ],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +400,21 @@ mod tests {
             assert!(
                 !selected.contains(field),
                 "{field} both selected and excluded"
+            );
+        }
+    }
+
+    #[test]
+    fn westchester_is_well_formed() {
+        let s = &WESTCHESTER_SCF;
+        assert_eq!(s.key_field(), "id");
+        assert_eq!(s.created_field(), "created_at");
+        assert_ne!(s.source_id, NYC_311.source_id);
+        let towns: std::collections::BTreeSet<_> = WESTCHESTER_TOWNS.iter().map(|t| t.1).collect();
+        for t in &towns {
+            assert!(
+                s.scope_sentence.contains(t),
+                "{t} missing from the scope sentence"
             );
         }
     }

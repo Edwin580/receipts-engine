@@ -2,15 +2,17 @@
 //! something a plan may want to filter out explicitly and visibly.
 
 use crate::manifest::KnownIssue;
+use crate::spec::Area;
 use receipts_core::time::{MICROS_PER_DAY, MICROS_PER_SECOND, days_from_civil};
 use receipts_core::{Column, ColumnData};
 
-/// A loose bounding box around the five boroughs.
-pub const NYC_LAT: (f32, f32) = (40.45, 40.95);
-pub const NYC_LON: (f32, f32) = (-74.30, -73.65);
-
-/// `rows_updated_at` is the source's last update (UTC epoch seconds), if known.
-pub fn known_issues(columns: &[Column], rows_updated_at: Option<i64>) -> Vec<KnownIssue> {
+/// `rows_updated_at` is the source's last update (UTC epoch seconds), if
+/// known; `area` is the dataset's area, for the location check.
+pub fn known_issues(
+    columns: &[Column],
+    rows_updated_at: Option<i64>,
+    area: &Area,
+) -> Vec<KnownIssue> {
     let find = |name: &str| columns.iter().find(|c| c.name == name);
     let timestamps = |c: &Column| match &c.data {
         ColumnData::Timestamp(v) => Some(v.clone()),
@@ -88,17 +90,18 @@ pub fn known_issues(columns: &[Column], rows_updated_at: Option<i64>) -> Vec<Kno
         let n = (0..lat.len())
             .filter(|&i| loc.is_valid(i))
             .filter(|&i| {
-                !(NYC_LAT.0..=NYC_LAT.1).contains(&lat[i])
-                    || !(NYC_LON.0..=NYC_LON.1).contains(&lon[i])
+                !(area.lat.0..=area.lat.1).contains(&lat[i])
+                    || !(area.lon.0..=area.lon.1).contains(&lon[i])
             })
             .count();
         push(
-            "KI-location-outside-nyc",
+            area.issue_id,
             &["location"],
             n,
             format!(
-                "{} requests have a location outside New York City.",
-                thousands(n)
+                "{} requests have a location outside {}.",
+                thousands(n),
+                area.name
             ),
         );
     }
