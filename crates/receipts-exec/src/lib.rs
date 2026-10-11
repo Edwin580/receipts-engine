@@ -257,8 +257,10 @@ fn run(
         }
         Op::Filter { predicate, .. } => {
             let t = input();
-            let d = Evaluator { table: t }.eval(predicate)?;
-            let keep = selection(&d, t.len());
+            let keep = match eval::fast_selection(t, predicate) {
+                Some(rows) => rows,
+                None => selection(&Evaluator { table: t }.eval(predicate)?, t.len()),
+            };
             if keep.len() == t.len() {
                 (t.columns().to_vec(), identity(t.len()))
             } else {

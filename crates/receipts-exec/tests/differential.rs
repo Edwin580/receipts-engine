@@ -644,6 +644,45 @@ fn bool_expr() -> impl Strategy<Value = Expr> {
         Just(col("b")),
         any::<bool>().prop_map(|b| lit(Literal::Bool(b))),
         Just(col("b").cmp(CmpOp::Lt, lit(Literal::Bool(true)))),
+        // Plain column-vs-constant and column-vs-column shapes, which the
+        // filter evaluates without building intermediate columns.
+        (
+            cmp(),
+            prop::sample::select(vec!["k", "x"]),
+            -3i64..4,
+            any::<bool>()
+        )
+            .prop_map(|(op, c, v, flip)| if flip {
+                lit_i64(v).cmp(op, col(c))
+            } else {
+                col(c).cmp(op, lit_i64(v))
+            }),
+        (
+            cmp(),
+            prop::sample::select(vec![0.0, -0.0, 0.5, -2.0]),
+            any::<bool>()
+        )
+            .prop_map(|(op, v, flip)| if flip {
+                lit_f64(v).cmp(op, col("f"))
+            } else {
+                col("f").cmp(op, lit_f64(v))
+            }),
+        (cmp(), prop::sample::select(vec!["t", "u"]), ts_lit())
+            .prop_map(|(op, c, l)| col(c).cmp(op, l)),
+        (
+            cmp(),
+            prop::sample::select(vec![
+                ("x", "k"),
+                ("k", "x"),
+                ("t", "u"),
+                ("u", "t"),
+                ("f", "f"),
+                ("u", "u")
+            ])
+        )
+            .prop_map(|(op, (a, b))| col(a).cmp(op, col(b))),
+        prop::sample::select(vec!["x", "f", "u", "s", "b", "g", "k"])
+            .prop_map(|c| col(c).is_null().not()),
     ];
     leaf.prop_recursive(3, 12, 3, |inner| {
         prop_oneof![
