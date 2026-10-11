@@ -145,6 +145,11 @@ fn arb_shape() -> impl Strategy<Value = Shape> {
         (AggFunc::Min, Some("t")),
         (AggFunc::Max, Some("t")),
         (AggFunc::Sum, Some("h")),
+        (AggFunc::Percentile(1), Some("f")),
+        (AggFunc::Percentile(10), Some("x")),
+        (AggFunc::Percentile(50), Some("f")),
+        (AggFunc::Percentile(90), Some("t")),
+        (AggFunc::Percentile(99), Some("x")),
     ]);
     (
         prop::option::of(0u8..3),

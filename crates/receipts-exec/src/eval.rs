@@ -431,7 +431,7 @@ fn cmp_num(a: Num, b: Num) -> Ordering {
 
 /// Decimal columns hold no NaN (see `arith`), so this is a total order in
 /// which `-0.0 == 0.0`.
-pub(crate) fn cmp_f64(x: f64, y: f64) -> Ordering {
+pub fn cmp_f64(x: f64, y: f64) -> Ordering {
     x.partial_cmp(&y).unwrap_or_else(|| x.total_cmp(&y))
 }
 

@@ -54,6 +54,9 @@ pub(crate) fn op_to_json(op: &Op, input: Option<Value>) -> Value {
                     let mut o = Map::new();
                     o.insert("name".into(), json!(a.name));
                     o.insert("fn".into(), json!(a.func.name()));
+                    if let AggFunc::Percentile(p) = a.func {
+                        o.insert("p".into(), json!(p));
+                    }
                     if let Some(c) = &a.column {
                         o.insert("column".into(), json!(c));
                     }
@@ -195,17 +198,32 @@ fn op_from_json(v: &Value) -> Result<Op, String> {
                 .iter()
                 .map(|a| {
                     let has_column = a.get("column").is_some();
-                    let keys: &[&str] = if has_column {
-                        &["name", "fn", "column"]
-                    } else {
-                        &["name", "fn"]
-                    };
-                    let a = Obj::new(a, keys)?;
+                    let percentile = a.get("fn").and_then(Value::as_str) == Some("percentile");
+                    let mut keys = vec!["name", "fn"];
+                    if has_column {
+                        keys.push("column");
+                    }
+                    if percentile {
+                        keys.push("p");
+                    }
+                    let a = Obj::new(a, &keys)?;
                     let name = a.str("fn")?;
-                    let func = AggFunc::ALL
-                        .into_iter()
-                        .find(|f| f.name() == name)
-                        .ok_or_else(|| format!("unknown aggregate \"{name}\""))?;
+                    let func = if percentile {
+                        let p = a.get("p")?;
+                        match p.as_u64() {
+                            Some(p @ 1..=99) => AggFunc::Percentile(p as u8),
+                            _ => {
+                                return Err(format!(
+                                    "a percentile's p must be a whole number from 1 to 99, not {p}"
+                                ));
+                            }
+                        }
+                    } else {
+                        AggFunc::ALL
+                            .into_iter()
+                            .find(|f| f.name() == name)
+                            .ok_or_else(|| format!("unknown aggregate \"{name}\""))?
+                    };
                     Ok(Aggregate {
                         name: a.str("name")?.to_string(),
                         func,
