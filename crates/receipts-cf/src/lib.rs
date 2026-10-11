@@ -12,8 +12,8 @@
 
 use receipts_core::{ColumnData, ContentHash};
 use receipts_exec::{
-    Exclusion, ExecError, Execution, SourceProvider, Table, aggregate_subset, execute_excluding,
-    median_of_sorted, rerun_from,
+    Exclusion, ExecError, Execution, SourceProvider, Table, aggregate_subset, cmp_f64,
+    execute_excluding, median_of_sorted, percentile_rank, rerun_from,
 };
 use receipts_lineage::StepLineage;
 use receipts_plan::{AggFunc, NodeId, Op, ValidPlan};
@@ -355,6 +355,32 @@ pub fn contributions(
                 _ => unreachable!("validated: numeric sum/mean"),
             }
         }
+        AggFunc::Percentile(p) => {
+            let c = col.as_ref().expect("reads a column");
+            // (value, member position), sorted the way the executor sorts:
+            // by value, ties in row order.
+            let ranked = |key: &dyn Fn(u32) -> CfValue| -> Vec<(CfValue, usize)> {
+                members
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, &m)| valid(m))
+                    .map(|(i, &m)| (key(m), i))
+                    .collect()
+            };
+            match &c.data {
+                ColumnData::I64(v) | ColumnData::Timestamp(v) => {
+                    let mut vals = ranked(&|m| CfValue::I64(v[m as usize]));
+                    vals.sort_by(|a, b| cf_cmp(&a.0, &b.0).then(a.1.cmp(&b.1)));
+                    percentile_without(&vals, n, p)
+                }
+                ColumnData::F64(v) => {
+                    let mut vals = ranked(&|m| CfValue::F64(v[m as usize]));
+                    vals.sort_by(|a, b| cf_cmp(&a.0, &b.0).then(a.1.cmp(&b.1)));
+                    percentile_without(&vals, n, p)
+                }
+                _ => unreachable!("validated: numeric or timestamp percentile"),
+            }
+        }
         AggFunc::Median | AggFunc::Min | AggFunc::Max => {
             let c = col.as_ref().expect("reads a column");
             // (value, member position) for non-null members, sorted by value.
@@ -490,6 +516,31 @@ fn extreme_without<T: Copy>(
         out[sorted[b].1] = second.map_or(CfValue::Null, pick);
     }
     out
+}
+
+/// The `p`th percentile without each member, given the non-null
+/// `(value, position)` pairs in the executor's order. Removing a value
+/// shifts the rank by one place at most, and it always picks a value, so
+/// the result is exact.
+fn percentile_without(sorted: &[(CfValue, usize)], n: usize, p: u8) -> Vec<CfValue> {
+    let all = percentile_rank(sorted.len(), p).map_or(CfValue::Null, |r| sorted[r].0);
+    let mut out = vec![all; n];
+    let rest = sorted.len().saturating_sub(1);
+    for (rank, (_, pos)) in sorted.iter().enumerate() {
+        out[*pos] = percentile_rank(rest, p).map_or(CfValue::Null, |r| {
+            sorted[if r < rank { r } else { r + 1 }].0
+        });
+    }
+    out
+}
+
+/// Value order for numbers of one type, as the executor sorts them.
+fn cf_cmp(a: &CfValue, b: &CfValue) -> Ordering {
+    match (a, b) {
+        (CfValue::I64(x), CfValue::I64(y)) => x.cmp(y),
+        (CfValue::F64(x), CfValue::F64(y)) => cmp_f64(*x, *y),
+        _ => unreachable!("one column, one type"),
+    }
 }
 
 /// Median of `sorted` with the element at `rank` removed, using the same
