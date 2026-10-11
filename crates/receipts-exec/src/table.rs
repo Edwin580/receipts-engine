@@ -204,7 +204,35 @@ pub(crate) fn validity_from(n: usize, valid: impl Fn(usize) -> bool) -> Option<B
 
 /// `out[i] = col[indices[i]]`.
 pub(crate) fn gather(col: &Column, indices: &[u32]) -> Column {
-    gather_opt(col, indices.iter().map(|&i| Some(i)), indices.len())
+    fn pick<T: Copy>(v: &[T], idx: &[u32]) -> Vec<T> {
+        idx.iter().map(|&i| v[i as usize]).collect()
+    }
+    let bits = |get: &dyn Fn(usize) -> bool| {
+        let mut b = Bitmap::with_capacity(indices.len());
+        for &i in indices {
+            b.push(get(i as usize));
+        }
+        b
+    };
+    let data = match &col.data {
+        ColumnData::I64(v) => ColumnData::I64(pick(v, indices)),
+        ColumnData::Timestamp(v) => ColumnData::Timestamp(pick(v, indices)),
+        ColumnData::F64(v) => ColumnData::F64(pick(v, indices)),
+        ColumnData::Bool(b) => ColumnData::Bool(bits(&|i| b.get(i))),
+        ColumnData::DictUtf8 { codes, dictionary } => ColumnData::DictUtf8 {
+            codes: pick(codes, indices),
+            dictionary: dictionary.clone(),
+        },
+        ColumnData::Geo { lat, lon } => ColumnData::Geo {
+            lat: pick(lat, indices),
+            lon: pick(lon, indices),
+        },
+    };
+    let validity = col.validity.as_ref().and_then(|v| {
+        let b = bits(&|i| v.get(i));
+        (b.count_zeros() > 0).then_some(b)
+    });
+    Column::new(col.name.clone(), data, validity)
 }
 
 /// Like `gather`, with `None` producing a null.

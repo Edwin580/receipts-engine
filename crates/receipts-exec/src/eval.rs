@@ -279,6 +279,150 @@ pub(crate) fn materialize(d: Datum, n: usize, name: &str) -> Column {
     crate::table::renamed(col, name)
 }
 
+/// Rows where `e` is true, computed directly for the shapes filters
+/// usually take: comparisons of a column with a constant or with a column of
+/// the same type, missing / not missing tests, and `and`s of those. Each
+/// conjunct only looks at the rows the previous ones kept. `None` means the
+/// shape isn't covered and the caller evaluates it in general; both give the
+/// same rows.
+pub(crate) fn fast_selection(table: &Table, e: &Expr) -> Option<Vec<u32>> {
+    fast_select(table, e, None)
+}
+
+fn fast_select(t: &Table, e: &Expr, candidates: Option<&[u32]>) -> Option<Vec<u32>> {
+    let keep = |test: &dyn Fn(usize) -> bool| -> Vec<u32> {
+        match candidates {
+            Some(c) => c.iter().copied().filter(|&i| test(i as usize)).collect(),
+            None => (0..t.len() as u32).filter(|&i| test(i as usize)).collect(),
+        }
+    };
+    let column = |e: &Expr| match e {
+        Expr::Column(c) => Some(
+            t.column(c)
+                .expect("validated plans only name existing columns"),
+        ),
+        _ => None,
+    };
+    match e {
+        Expr::And(parts) => {
+            if !parts.iter().all(|p| fast_covers(t, p)) {
+                return None;
+            }
+            let mut rows: Option<Vec<u32>> = candidates.map(<[u32]>::to_vec);
+            for p in parts {
+                rows = Some(fast_select(t, p, rows.as_deref())?);
+            }
+            // An empty `and` is true.
+            Some(rows.unwrap_or_else(|| (0..t.len() as u32).collect()))
+        }
+        Expr::IsNull(a) => {
+            let c = column(a)?;
+            Some(keep(&|i| !c.is_valid(i)))
+        }
+        Expr::Not(a) => match a.as_ref() {
+            Expr::IsNull(b) => {
+                let c = column(b)?;
+                Some(keep(&|i| c.is_valid(i)))
+            }
+            _ => None,
+        },
+        Expr::Compare(op, a, b) => {
+            let (op, a, b) = match (a.as_ref(), b.as_ref()) {
+                (Expr::Literal(_), Expr::Column(_)) => (flip(*op), b, a),
+                _ => (*op, a, b),
+            };
+            let ca = column(a)?;
+            match (&ca.data, b.as_ref()) {
+                (ColumnData::DictUtf8 { codes, dictionary }, Expr::Literal(Literal::Str(s))) => {
+                    // Decide once per dictionary entry; it is sorted, so the
+                    // string's insertion point orders every code against it.
+                    let pos = dictionary.partition_point(|d| d.as_str() < s.as_str());
+                    let found = dictionary.get(pos).is_some_and(|d| d == s);
+                    let mask: Vec<bool> = (0..dictionary.len())
+                        .map(|k| {
+                            op.holds(if k < pos {
+                                Ordering::Less
+                            } else if k == pos && found {
+                                Ordering::Equal
+                            } else {
+                                Ordering::Greater
+                            })
+                        })
+                        .collect();
+                    Some(keep(&|i| ca.is_valid(i) && mask[codes[i] as usize]))
+                }
+                (ColumnData::I64(v), Expr::Literal(Literal::I64(x)))
+                | (ColumnData::Timestamp(v), Expr::Literal(Literal::Timestamp(x))) => {
+                    Some(keep(&|i| ca.is_valid(i) && op.holds(v[i].cmp(x))))
+                }
+                (ColumnData::F64(v), Expr::Literal(Literal::F64(x))) => {
+                    Some(keep(&|i| ca.is_valid(i) && op.holds(cmp_f64(v[i], *x))))
+                }
+                (_, Expr::Column(_)) => {
+                    let cb = column(b)?;
+                    let both = |i: usize| ca.is_valid(i) && cb.is_valid(i);
+                    match (&ca.data, &cb.data) {
+                        (ColumnData::I64(x), ColumnData::I64(y))
+                        | (ColumnData::Timestamp(x), ColumnData::Timestamp(y)) => {
+                            Some(keep(&|i| both(i) && op.holds(x[i].cmp(&y[i]))))
+                        }
+                        (ColumnData::F64(x), ColumnData::F64(y)) => {
+                            Some(keep(&|i| both(i) && op.holds(cmp_f64(x[i], y[i]))))
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Whether `fast_select` handles `e`, checked before doing any work.
+fn fast_covers(t: &Table, e: &Expr) -> bool {
+    let col = |e: &Expr| match e {
+        Expr::Column(c) => t.column(c).map(|c| &c.data),
+        _ => None,
+    };
+    match e {
+        Expr::And(parts) => parts.iter().all(|p| fast_covers(t, p)),
+        Expr::IsNull(a) => col(a).is_some(),
+        Expr::Not(a) => matches!(a.as_ref(), Expr::IsNull(b) if col(b).is_some()),
+        Expr::Compare(_, a, b) => {
+            let (a, b) = match (a.as_ref(), b.as_ref()) {
+                (Expr::Literal(_), Expr::Column(_)) => (b, a),
+                _ => (a, b),
+            };
+            match (col(a), b.as_ref()) {
+                (Some(ColumnData::DictUtf8 { .. }), Expr::Literal(Literal::Str(_)))
+                | (Some(ColumnData::I64(_)), Expr::Literal(Literal::I64(_)))
+                | (Some(ColumnData::Timestamp(_)), Expr::Literal(Literal::Timestamp(_)))
+                | (Some(ColumnData::F64(_)), Expr::Literal(Literal::F64(_))) => true,
+                (Some(x), Expr::Column(_)) => matches!(
+                    (x, col(b)),
+                    (ColumnData::I64(_), Some(ColumnData::I64(_)))
+                        | (ColumnData::Timestamp(_), Some(ColumnData::Timestamp(_)))
+                        | (ColumnData::F64(_), Some(ColumnData::F64(_)))
+                ),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+/// `x op y` as `y flip(op) x`.
+fn flip(op: CmpOp) -> CmpOp {
+    match op {
+        CmpOp::Lt => CmpOp::Gt,
+        CmpOp::Le => CmpOp::Ge,
+        CmpOp::Gt => CmpOp::Lt,
+        CmpOp::Ge => CmpOp::Le,
+        o => o,
+    }
+}
+
 /// Value `i` of a true/false datum, `None` if missing.
 pub(crate) fn bool_at(d: &Datum, i: usize) -> Option<bool> {
     get_bool(d)(i)

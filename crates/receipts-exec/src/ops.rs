@@ -29,17 +29,105 @@ pub(crate) fn row_cmp(col: &Column) -> Box<dyn Fn(usize, usize) -> Ordering + Se
 }
 
 /// Stable sort permutation: `out[i]` is the input row placed at position `i`.
+///
+/// Each key column is first encoded as integers whose order is the
+/// column's order (missing smallest, reversed for descending). The row
+/// number goes last, so every entry is distinct: an unstable sort of the
+/// encoded entries gives exactly the stable order, without calling a
+/// comparator per comparison.
 pub(crate) fn sort_permutation(n: usize, keys: &[(&Column, bool)]) -> Vec<u32> {
+    fn sort<T: Ord + Send>(v: &mut [T]) {
+        #[cfg(feature = "parallel")]
+        rayon::slice::ParallelSliceMut::par_sort_unstable(v);
+        #[cfg(not(feature = "parallel"))]
+        v.sort_unstable();
+    }
+    let Some(enc) = keys
+        .iter()
+        .map(|(c, desc)| sort_keys(n, c, *desc))
+        .collect::<Option<Vec<Vec<u64>>>>()
+    else {
+        return sort_by_comparators(n, keys);
+    };
+    match &enc[..] {
+        [] => (0..n as u32).collect(),
+        [a] => {
+            let mut v: Vec<(u64, u32)> = (0..n).map(|i| (a[i], i as u32)).collect();
+            sort(&mut v);
+            v.into_iter().map(|e| e.1).collect()
+        }
+        [a, b] => {
+            let mut v: Vec<(u64, u64, u32)> = (0..n).map(|i| (a[i], b[i], i as u32)).collect();
+            sort(&mut v);
+            v.into_iter().map(|e| e.2).collect()
+        }
+        _ => {
+            let mut v: Vec<(Vec<u64>, u32)> = (0..n)
+                .map(|i| (enc.iter().map(|k| k[i]).collect(), i as u32))
+                .collect();
+            sort(&mut v);
+            v.into_iter().map(|e| e.1).collect()
+        }
+    }
+}
+
+/// One integer per row whose unsigned order is the order `row_cmp` gives,
+/// or its reverse for `descending`. Missing values encode as 0, which no
+/// present value uses. `None` for the one column this can't encode: an
+/// integer or timestamp column with missing values that also holds
+/// `i64::MIN`.
+fn sort_keys(n: usize, col: &Column, descending: bool) -> Option<Vec<u64>> {
+    let present = |i: usize| col.is_valid(i);
+    let mut out: Vec<u64> = match &col.data {
+        ColumnData::I64(v) | ColumnData::Timestamp(v) => {
+            if col.validity.is_some() && (0..n).any(|i| present(i) && v[i] == i64::MIN) {
+                return None;
+            }
+            // Flipping the sign bit orders i64 as u64; only i64::MIN maps to 0.
+            (0..n)
+                .map(|i| {
+                    if present(i) {
+                        v[i] as u64 ^ (1 << 63)
+                    } else {
+                        0
+                    }
+                })
+                .collect()
+        }
+        ColumnData::F64(v) => (0..n)
+            .map(|i| {
+                if !present(i) {
+                    return 0;
+                }
+                // Decimal columns hold no NaN or infinity, so no value maps
+                // to 0; -0.0 equals 0.0, as in cmp_f64.
+                let bits = if v[i] == 0.0 { 0 } else { v[i].to_bits() };
+                if bits >> 63 == 1 {
+                    !bits
+                } else {
+                    bits | (1 << 63)
+                }
+            })
+            .collect(),
+        ColumnData::Bool(b) => (0..n)
+            .map(|i| if present(i) { 1 + b.get(i) as u64 } else { 0 })
+            .collect(),
+        ColumnData::DictUtf8 { codes, .. } => (0..n)
+            .map(|i| if present(i) { 1 + codes[i] as u64 } else { 0 })
+            .collect(),
+        ColumnData::Geo { .. } => unreachable!("validated: locations aren't ordered"),
+    };
+    if descending {
+        out.iter_mut().for_each(|k| *k = !*k);
+    }
+    Some(out)
+}
+
+/// The general stable sort, for keys `sort_keys` can't encode.
+fn sort_by_comparators(n: usize, keys: &[(&Column, bool)]) -> Vec<u32> {
     let cmps: Vec<_> = keys.iter().map(|(c, desc)| (row_cmp(c), *desc)).collect();
     let mut perm: Vec<u32> = (0..n as u32).collect();
-    // Both sorts are stable, so the permutation is the same either way.
-    #[cfg(feature = "parallel")]
-    use rayon::slice::ParallelSliceMut;
-    #[cfg(feature = "parallel")]
-    let sort = |p: &mut [u32], f: &(dyn Fn(&u32, &u32) -> Ordering + Sync)| p.par_sort_by(f);
-    #[cfg(not(feature = "parallel"))]
-    let sort = |p: &mut [u32], f: &(dyn Fn(&u32, &u32) -> Ordering + Sync)| p.sort_by(f);
-    sort(&mut perm, &|&a, &b| {
+    perm.sort_by(|&a, &b| {
         for (cmp, desc) in &cmps {
             let o = cmp(a as usize, b as usize);
             if o != Ordering::Equal {
@@ -399,4 +487,58 @@ pub(crate) fn group_lineage(groups: &Groups, order: &[u32]) -> StepLineage {
         fill[p] += 1;
     }
     StepLineage::Group { offsets, rows }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use receipts_core::Bitmap;
+
+    fn column(data: ColumnData, valid: &[bool]) -> Column {
+        let validity = valid
+            .contains(&false)
+            .then(|| Bitmap::from_bools(valid.iter().copied()));
+        Column::new("c", data, validity)
+    }
+
+    const INTS: [i64; 6] = [i64::MIN, -1, 0, 1, 7, i64::MAX];
+    const FLOATS: [f64; 7] = [-f64::MAX, -1.5, -0.0, 0.0, 1e-300, 2.0, f64::MAX];
+
+    proptest! {
+        // The encoded sort must give exactly the comparator sort's order,
+        // including missing values, -0.0 == 0.0 and the extremes.
+        #[test]
+        fn encoded_sort_equals_comparator_sort(
+            rows in prop::collection::vec((0usize..6, 0usize..7, 0u32..4, any::<bool>(), any::<bool>()), 0..60),
+            nullable in any::<bool>(),
+            keys in prop::collection::vec((0usize..4, any::<bool>()), 1..4),
+        ) {
+            let n = rows.len();
+            let valid: Vec<bool> = rows.iter().map(|r| !nullable || r.4).collect();
+            let cols = [
+                column(ColumnData::I64(rows.iter().map(|r| INTS[r.0]).collect()), &valid),
+                column(ColumnData::F64(rows.iter().map(|r| FLOATS[r.1]).collect()), &valid),
+                column(
+                    ColumnData::DictUtf8 {
+                        codes: rows.iter().map(|r| r.2).collect(),
+                        dictionary: ["a", "b", "c", "d"].map(String::from).to_vec(),
+                    },
+                    &valid,
+                ),
+                column(ColumnData::Bool(Bitmap::from_bools(rows.iter().map(|r| r.3))), &valid),
+            ];
+            let keys: Vec<(&Column, bool)> = keys.iter().map(|&(c, d)| (&cols[c], d)).collect();
+            prop_assert_eq!(sort_permutation(n, &keys), sort_by_comparators(n, &keys));
+        }
+    }
+
+    #[test]
+    fn integers_with_missing_values_and_i64_min_fall_back() {
+        let c = column(ColumnData::I64(vec![5, i64::MIN, 0]), &[true, true, false]);
+        assert!(sort_keys(3, &c, false).is_none());
+        // Missing first, then i64::MIN.
+        assert_eq!(sort_permutation(3, &[(&c, false)]), vec![2, 1, 0]);
+        assert_eq!(sort_permutation(3, &[(&c, true)]), vec![0, 1, 2]);
+    }
 }
