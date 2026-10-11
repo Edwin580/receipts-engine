@@ -100,12 +100,16 @@ function closed(snapshot, q) {
     });
 }
 
+/** "9 in 10 were closed within" this many hours: a nearest-rank percentile, so it is one complaint's time. */
+export const SLOW_P = 90;
+
 const TIME_AGGREGATES = [
   { name: "complaints", fn: "count" },
   { name: "median_hours", fn: "median", column: "hours_to_close" },
+  { name: "p90_hours", fn: "percentile", p: SLOW_P, column: "hours_to_close" },
 ];
 
-/** One row: how many closed complaints, and the median hours to close. */
+/** One row: how many closed complaints, the median hours to close, and the 90th percentile. */
 export function waitPlan(snapshot, q) {
   return closed(snapshot, q).add({ op: "aggregate", group_by: [], aggregates: TIME_AGGREGATES }).done();
 }

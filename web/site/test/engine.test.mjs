@@ -66,19 +66,19 @@ test("every question runs, and the counts are consistent", () => {
   for (const type of types.slice(0, 6)) {
     for (const area of areas) {
       const q = { type, area };
-      const [closed, med] = rows(waitPlan(S, q))[0];
+      const [closed, med, p90] = rows(waitPlan(S, q))[0];
       const [filed, withDate] = rows(countsPlan(S, q))[0];
       assert.ok(filed >= withDate && withDate >= closed, JSON.stringify({ q, filed, withDate, closed }));
       assert.equal(med === null, closed === 0);
-      if (med !== null) assert.ok(med >= 0);
+      if (med !== null) assert.ok(med >= 0 && p90 >= med, JSON.stringify({ q, med, p90 }));
     }
   }
 });
 
-test("a district's median equals the median of the complaints it traces back to", () => {
+test("a district's median and 90th percentile match the complaints it traces back to", () => {
   const q = { type: "Noise - Residential", area: { kind: "district", value: "04 BRONX" } };
   const r = run(waitPlan(S, q));
-  const [closed, med] = r.output.rows[0];
+  const [closed, med, p90] = r.output.rows[0];
   const ids = engine.traceBackRows(r.execution, 0);
   assert.equal(ids.length, closed);
   const recs = JSON.parse(engine.sourceRecords(S, ids));
@@ -87,6 +87,11 @@ test("a district's median equals the median of the complaints it traces back to"
   const hours = recs.rows.map((row) => hoursBetween(row[c("created_date")], row[c("closed_date")]));
   assert.ok(hours.every((h) => h >= 0));
   assert.ok(Math.abs(median(hours) - med) < 1e-9, `${median(hours)} vs ${med}`);
+  // Nearest rank: at least 90% at or below it, and it is one of the times.
+  const sorted = [...hours].sort((a, b) => a - b);
+  const exact = sorted[Math.ceil(0.9 * sorted.length) - 1];
+  assert.ok(Math.abs(exact - p90) < 1e-9, `${exact} vs ${p90}`);
+  assert.ok(sorted.filter((h) => h <= p90 + 1e-9).length >= 0.9 * sorted.length);
   engine.dropExecution(r.execution);
 });
 

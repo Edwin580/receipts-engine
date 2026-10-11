@@ -129,6 +129,8 @@ button.text { border: 0; padding: 0; color: var(--accent); text-decoration: unde
 .headline { font-size: 1.7rem; line-height: 1.3; margin: 1.6rem 0 .8rem; }
 .headline .lead { display: block; font-size: 1rem; font-style: italic; color: var(--muted); }
 .headline b { color: var(--accent); font-weight: normal; }
+.headline .tail { display: block; font-size: 1.15rem; margin-top: .2rem; }
+@media (max-width: 30rem) { .result .tailcol { display: none; } }
 @media (max-width: 34rem) { .headline { font-size: 1.4rem; } }
 .ask.small { font-size: 1rem; }
 #zip { width: 4.2em; background: transparent; border: 0; border-bottom: 1px dotted var(--accent); color: var(--accent); padding: 0 .1em; border-radius: 0; }

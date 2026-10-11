@@ -6,6 +6,7 @@
 <title>Methods and limits</title>
 <meta name="description" content="What the 311 wait times measure, what they leave out, and how they are computed.">
 <meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -19,6 +20,7 @@
 <section>
   <h2>What is measured</h2>
   <p>For each complaint, the time to close is its closed date minus its created date, both as the city publishes them in the <a href="https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2010-to-Present/erm2-nwe9">311 Service Requests</a> dataset. The answer on the main page is the median of those times: half of the complaints were closed faster, half slower. The median is used instead of the average because a few complaints stay open for months and would pull an average far away from what most people experience.</p>
+  <p>"9 in 10 were closed within" is the 90th percentile, using the nearest-rank method: line the closed complaints up from fastest to slowest and take the one 90% of the way along. It is always one real complaint's time, so at least 9 in 10 were closed at least that quickly. It is shown only when at least 10 complaints were closed.</p>
   <p>Areas are the city's own fields on each complaint: borough, community district (<code>community_board</code>), and ZIP code (<code>incident_zip</code>). Community district codes above 18 are parks and other special areas and are not listed as districts. Rankings leave out districts with fewer than 20 closed complaints.</p>
 
   <h2>What it leaves out</h2>
