@@ -1,27 +1,27 @@
 # Receipts
 
-Click a number computed from New York City 311 data and see the requests it
-came from, every step in between, and what the number becomes if you leave
-some of them out. The query engine is my own, written in Rust and compiled
-to WebAssembly, and it runs in your browser.
+**https://edwin580.github.io/receipts-engine/**
 
-**Try it: https://edwin580.github.io/receipts-engine/**
+How long does New York City take to close a 311 complaint? Pick a complaint
+type and a place (borough, community district or ZIP code) and the site
+says how long it took to close half of those complaints, how that compares
+with the rest of the city and with neighbouring districts, and lists the
+actual complaints behind the number, each linked to the city's own record.
 
-The demo loads one month of real 311 requests (July 2025, 315,883 rows,
-10.7 MB) so it stays quick on a phone. Nothing to install, no account.
-On the page you can:
+It is built for residents and community boards who want to know whether
+their area waits longer than others, and to be able to check the answer
+instead of taking it on trust. Everything runs in the browser on a snapshot
+of the city's open data (currently July 2025, 315,883 complaints); there is
+no server and no account. What the numbers mean and what they leave out is
+on the [methods page](https://edwin580.github.io/receipts-engine/methods.html).
 
-- change the question (mean or median hours to close, or a count, for any
-  common complaint type, by borough, agency or channel) and watch the plan
-  re-run;
-- click any number to trace it back to its source rows, with each step's
-  row count and a link from every request to the same record in the city's
-  API;
-- drag a slider to leave out the requests that move the number most, and
-  see the exact new value;
-- flip bits in the data file and watch the engine refuse to load it.
+Under the site is a small query engine, written in Rust and compiled to
+WebAssembly, that keeps track of which source rows every result came from.
+That is what lets the page list the complaints behind an answer and say
+exactly how much any one of them moves it. The snapshot tool, the engine and
+the site are all in this repository.
 
-## Run the demo locally
+## Run the site locally
 
 ```
 rustup target add wasm32-unknown-unknown
@@ -31,13 +31,13 @@ python3 -m http.server -d web/site 8000   # then open http://localhost:8000
 node --test web/site/test/*.test.mjs   # page logic and the real snapshot
 ```
 
-The page is static files: `web/site/index.html`, `app.js` (talks to the
-engine), `lib.js` (builds plans from the controls; no DOM), `style.css`,
-the ET Book fonts, and the demo snapshot in `web/site/data/`. It has no
+The site is static files: `web/site/index.html` and `methods.html`,
+`app.js` (talks to the engine), `lib.js` (builds queries from the form; no
+DOM), `style.css`, the ET Book fonts, and the snapshot in `web/site/data/`. It has no
 JavaScript dependencies and no bundler. `.github/workflows/pages.yml`
 builds the WASM package and publishes `web/site` on every push to `main`.
 
-The demo snapshot was made with the CLI below:
+The snapshot was made with the CLI below:
 
 ```
 receipts-snapshot fetch --out raw/jul2025 --from 2025-07-01 --to 2025-08-01
@@ -53,8 +53,8 @@ M0 (snapshot pipeline) implemented and verified against the
 live Socrata API on 2026-09-24: 7,111,809 rows, snapshot `3b42e46a…` (see
 `docs/benchmarks/m0.md`). M1 (plans), M2 (lineage) and M3 (counterfactuals) merged. M4 (the engine
 in the browser: WASM, verify-on-load, threads) implemented, awaiting
-review (see `docs/engine/wasm-api.md`, `docs/benchmarks/m4.md`). The demo
-page in `web/site` stands in for the M5 frontend.
+review (see `docs/engine/wasm-api.md`, `docs/benchmarks/m4.md`). The site in
+`web/site` is the frontend.
 
 ## Snapshot CLI
 
@@ -116,10 +116,9 @@ crates/
   receipts-snapshot/  offline snapshot CLI                         (M0)
   receipts-bench/     benchmarks on real snapshots                 (M1)
 web/
-  site/               the demo page (static; see above)
+  site/               the site (static; see above)
   engine-test/        browser benchmark, parity test, dev server   (M4)
   pkg/                WASM builds (generated, not committed)
-                      React + TS frontend                          (M5)
 tools/wasm/           build script for both WASM packages          (M4)
 docs/
   adr/                architecture decision records

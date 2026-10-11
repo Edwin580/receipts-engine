@@ -1,5 +1,5 @@
-# Publishes the demo page (web/site) to GitHub Pages: builds the single
-# threaded WASM package, runs the page's tests, uploads web/site.
+# Publishes the site (web/site) to GitHub Pages: builds the single
+# threaded WASM package, runs the site tests, uploads web/site.
 name: pages
 on:
   push:

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Methods and limits</title>
+<meta name="description" content="What the 311 wait times measure, what they leave out, and how they are computed.">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<article>
+
+<header>
+  <h1>Methods and limits</h1>
+  <p class="subtitle"><a href="./">Back to the wait times</a></p>
+</header>
+
+<section>
+  <h2>What is measured</h2>
+  <p>For each complaint, the time to close is its closed date minus its created date, both as the city publishes them in the <a href="https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2010-to-Present/erm2-nwe9">311 Service Requests</a> dataset. The answer on the main page is the median of those times: half of the complaints were closed faster, half slower. The median is used instead of the average because a few complaints stay open for months and would pull an average far away from what most people experience.</p>
+  <p>Areas are the city's own fields on each complaint: borough, community district (<code>community_board</code>), and ZIP code (<code>incident_zip</code>). Community district codes above 18 are parks and other special areas and are not listed as districts. Rankings leave out districts with fewer than 20 closed complaints.</p>
+
+  <h2>What it leaves out</h2>
+  <p><b>Closed is not the same as fixed.</b> The city marks a complaint closed when the agency finishes with it. That can mean the problem was fixed, that an inspector found nothing, that police responded and left, or that it was referred elsewhere. The time to close measures the city's process, not whether the problem went away.</p>
+  <p><b>Open complaints are not counted.</b> Complaints with no closed date when the data was downloaded have no time to close yet. The main page says how many there are. Because they are usually the slow ones, the median of the closed complaints is lower than the eventual median would be.</p>
+  <p><b>Complaints closed before they were opened</b> are left out. These are data entry errors; the main page says how many there were.</p>
+  <p><b>One period.</b> The site currently loads one month of complaints so that it stays quick on a phone. Seasonal complaints, like heat in winter or fireworks in summer, only show up in their season.</p>
+
+  <h2>How it is computed</h2>
+  <p>Everything is computed in your browser. The page downloads a snapshot of the city's data and a query engine compiled to WebAssembly, then runs each question as a small query: filter to the complaint type, filter to the area, keep closed complaints, compute the hours each took, take the median. "How this was counted" on the main page lists those steps with the number of complaints left after each one. The sentences there are generated from the query the engine ran, not written separately.</p>
+  <p>The engine keeps track of which complaints each result came from. That is how the page lists the actual complaints behind an answer, and how it can say how much any single complaint moves the answer: it computes the median without each complaint, exactly, without re-running the whole query.</p>
+  <p>Each complaint number links to the same record in the city's API, so any one of them can be checked against the source.</p>
+
+  <h2>The data</h2>
+  <p>The snapshot is built by a command-line tool that pages through the city's Socrata API, keeps the raw responses, and writes a typed, sorted, compressed <a href="https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format">Arrow</a> file. Cleaning only changes how a value is stored, for example parsing dates. It never drops or edits a complaint because it looks wrong; judgements like "a complaint can't close before it opens" are steps in the query, where they can be seen.</p>
+  <p>Every part of the snapshot is hashed with <a href="https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf">BLAKE3</a>, and the hashes roll up into one fingerprint shown at the bottom of the main page. Before running anything, the engine re-derives every hash from the downloaded bytes and refuses data that doesn't match, so a corrupted or altered download can't produce an answer. The fingerprint covers the values, not the file's exact bytes, so the same data compressed differently has the same fingerprint, and a change to padding that alters no value is not an error.</p>
+
+  <h2>Source and prior work</h2>
+  <p>The code is on <a href="https://github.com/Edwin580/receipts-engine">GitHub</a>: the snapshot tool, the query engine (plans, execution, lineage, counterfactuals), and this site. The design notes are in <a href="https://github.com/Edwin580/receipts-engine/tree/main/docs">docs/</a>.</p>
+  <p>Tracing a result back to its source rows is an old database problem: Cui, Widom and Wiener, <a href="https://doi.org/10.1145/357775.357777">Tracing the lineage of view data in a warehousing environment</a> (ACM TODS, 2000). Asking what a result becomes when source rows are removed is deletion propagation: Buneman, Khanna and Tan, <a href="https://doi.org/10.1145/543613.543633">On propagation of deletions and annotations through views</a> (PODS 2002).</p>
+
+  <p class="foot">
+    Data from <a href="https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2010-to-Present/erm2-nwe9">NYC Open Data</a>, under the city's <a href="https://opendata.cityofnewyork.us/overview/#termsofuse">terms of use</a>. This site is not affiliated with the City of New York.
+    Set in ET Book; layout after <a href="https://edwardtufte.github.io/tufte-css/">Tufte CSS</a>.
+  </p>
+</section>
+
+</article>
+</body>
+</html>
