@@ -151,6 +151,30 @@ export function listPlan(snapshot, q, order, n) {
     .done();
 }
 
+/**
+ * The question as a URL query: "?type=Rodent&area=district%3A04+BRONX",
+ * plus "&complaint=123" when one is being checked. Citywide is left out.
+ */
+export function toSearch(q, complaint = null) {
+  const p = new URLSearchParams();
+  if (q.type) p.set("type", q.type);
+  if (q.area && q.area.kind !== "city") p.set("area", areaKey(q.area));
+  if (complaint) p.set("complaint", String(complaint));
+  const s = p.toString();
+  return s ? "?" + s : "";
+}
+
+/** The inverse of `toSearch`; anything missing or malformed is null / citywide. */
+export function fromSearch(search) {
+  const p = new URLSearchParams(search);
+  const complaint = p.get("complaint");
+  return {
+    type: p.get("type") || null,
+    area: parseAreaKey(p.get("area")),
+    complaint: complaint && /^\d{1,18}$/.test(complaint) ? complaint : null,
+  };
+}
+
 /** One row whose trace is the snapshot row with this complaint number (none if absent). */
 export function keyPlan(snapshot, uniqueKey) {
   if (!/^\d{1,18}$/.test(String(uniqueKey))) throw new Error(`"${uniqueKey}" is not a complaint number`);

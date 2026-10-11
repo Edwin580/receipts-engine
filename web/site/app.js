@@ -5,7 +5,7 @@
 
 import init, { Engine } from "./pkg/receipts_wasm.js";
 import {
-  BOROUGHS, MIN_RANKED, waitPlan, keyPlan, fasterPlan, questionFor, whyNotCounted, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan,
+  BOROUGHS, MIN_RANKED, waitPlan, keyPlan, fasterPlan, questionFor, whyNotCounted, toSearch, fromSearch, comparePlan, countsPlan, listPlan, topTypesPlan, districtsPlan,
   parseDistrict, districtName, boroughName, areaName, areaKey, parseAreaKey, rankOf, ordinal,
   fmtInt, fmtDuration, fmtWhen, hoursBetween, periodName, typeName, shortHash,
 } from "./lib.js";
@@ -32,6 +32,7 @@ const state = {
   period: "",
   fetchedAt: "",
   q: { type: null, area: { kind: "city" } },
+  complaint: null,  // the complaint number being checked, if any
   order: "slowest",
   list: [],
   columns: [],
@@ -124,9 +125,9 @@ async function load() {
   }
   areaSel.append(el("option", { value: "zip" }, "a ZIP code"));
 
-  typeSel.addEventListener("change", () => { $("yours").hidden = true; state.q.type = typeSel.value; answer(); });
+  typeSel.addEventListener("change", () => { forgetComplaint(); state.q.type = typeSel.value; answer(); });
   areaSel.addEventListener("change", () => {
-    $("yours").hidden = true;
+    forgetComplaint();
     if (areaSel.value === "zip") {
       $("zip-wrap").hidden = false;
       $("zip").focus();
@@ -139,18 +140,57 @@ async function load() {
   });
   $("zip").addEventListener("input", () => {
     const v = $("zip").value.trim();
-    if (/^\d{5}$/.test(v)) setArea({ kind: "zip", value: v });
+    if (/^\d{5}$/.test(v)) { forgetComplaint(); setArea({ kind: "zip", value: v }); }
   });
   $("order").addEventListener("change", () => { state.order = $("order").value; listComplaints(); fitSelects(); });
   $("more").addEventListener("click", showMore);
   $("lookup").addEventListener("submit", (ev) => { ev.preventDefault(); lookUp($("key").value); });
+  $("copy-link").addEventListener("click", copyLink);
 
   typeSel.disabled = false;
   areaSel.disabled = false;
   $("lookup").hidden = false;
   setStatus("");
-  answer();
+
+  // A shared link holds the question, and maybe a complaint to check.
+  const want = fromSearch(location.search);
+  // A type outside the menu is used only if the data has it.
+  if (want.type && ![...typeSel.options].some((o) => o.value === want.type)
+      && rows(countsPlan(state.snapshot, { type: want.type, area: { kind: "city" } }))[0][0] === 0) {
+    want.type = null;
+  }
+  if (want.type) {
+    const known = (a) => a.kind === "zip" || [...areaSel.options].some((o) => o.value === areaKey(a));
+    setQuestion({ type: want.type, area: known(want.area) ? want.area : { kind: "city" } });
+  } else {
+    answer();
+  }
+  if (want.complaint) {
+    $("key").value = want.complaint;
+    lookUp(want.complaint);
+  }
   document.fonts?.ready.then(fitSelects);
+}
+
+function forgetComplaint() {
+  $("yours").hidden = true;
+  state.complaint = null;
+}
+
+/** Keeps the address bar on the current question, so it can be shared. */
+function updateUrl() {
+  history.replaceState(null, "", (toSearch(state.q, state.complaint) || location.pathname) + location.hash);
+}
+
+async function copyLink() {
+  const b = $("copy-link");
+  try {
+    await navigator.clipboard.writeText(location.href);
+    b.textContent = "Link copied";
+  } catch {
+    b.textContent = "Couldn't copy; the address bar has the link";
+  }
+  setTimeout(() => { b.textContent = "Copy a link to this answer"; }, 2500);
 }
 
 /** Points the menus at `q`, adding its type if the menu doesn't list it. */
@@ -178,6 +218,8 @@ function lookUp(raw) {
   state.engine.dropExecution(found.execution);
   if (ids.length === 0) {
     out.replaceChildren(el("p", {}, `Complaint #${key} isn't in this data, which covers complaints filed in ${state.period}.`));
+    state.complaint = null;
+    updateUrl();
     return;
   }
   const recs = JSON.parse(state.engine.sourceRecords(state.snapshot, ids.subarray(0, 1)));
@@ -214,11 +256,17 @@ function lookUp(raw) {
     verdict = `It isn't counted above. The step that left it out: ${trace.dropped.sentence}`;
   }
   out.replaceChildren(what, el("p", {}, verdict));
+  state.complaint = key;
+  updateUrl();
 }
 
 function setArea(area) {
   state.q.area = area;
-  if (area.kind !== "zip") {
+  if (area.kind === "zip") {
+    $("area").value = "zip";
+    $("zip-wrap").hidden = false;
+    $("zip").value = area.value;
+  } else {
     $("area").value = areaKey(area);
     $("zip-wrap").hidden = true;
   }
@@ -297,6 +345,7 @@ function answer() {
   renderCompare(cmp, borough);
   listComplaints();
   fitSelects();
+  updateUrl();
 }
 
 function renderCompare(cmp, borough) {
@@ -312,7 +361,7 @@ function renderCompare(cmp, borough) {
     const area = byDistrict ? { kind: "district", value: g } : { kind: "borough", value: g };
     const few = n < MIN_RANKED;
     return el("tr", { class: g === current ? "selected" : "" },
-      el("td", { class: "group" }, el("button", { type: "button", class: "cell", onclick: () => setArea(area) },
+      el("td", { class: "group" }, el("button", { type: "button", class: "cell", onclick: () => { forgetComplaint(); setArea(area); } },
         byDistrict ? districtName(g) : boroughName(g))),
       el("td", { class: "num" }, fmtInt(n)),
       el("td", few ? { class: "num few", title: "Too few complaints to rank" } : { class: "num" }, fmtDuration(m)),
