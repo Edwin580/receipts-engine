@@ -6,20 +6,46 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Count SeeClickFix reports in Westchester
+      - name: Count SeeClickFix reports in Westchester, by organization
         run: |
-          set -u
-          count() {
-            body=$(curl -sS -A "receipts-engine (github.com/Edwin580/receipts-engine)" "https://seeclickfix.com/api/v2/issues?$1&per_page=1&status=open,acknowledged,closed,archived")
-            n=$(echo "$body" | python3 -c "import json,sys; print(json.load(sys.stdin)['metadata']['pagination']['entries'])" 2>/dev/null || echo "error: $(echo "$body" | head -c 80)")
-            echo "::warning::$2: $n"
-            sleep 2
-          }
-          BOX="min_lat=40.88&max_lat=41.37&min_lng=-73.99&max_lng=-73.48"
-          count "$BOX" "Westchester box, all time"
-          for y in 2023 2024 2025 2026; do count "$BOX&after=$y-01-01T00:00:00-05:00&before=$((y+1))-01-01T00:00:00-05:00" "Westchester box, $y"; done
-          count "min_lat=40.90&max_lat=40.99&min_lng=-73.91&max_lng=-73.83&after=2025-01-01T00:00:00-05:00" "Yonkers box, since 2025"
-          for p in yonkers new-rochelle white-plains mount-vernon peekskill ossining greenburgh scarsdale rye mamaroneck port-chester westchester-county; do count "place_url=$p" "place $p"; done
+          python3 - <<'PY'
+          import json, time, urllib.request, collections
+          UA = {"User-Agent": "receipts-engine (github.com/Edwin580/receipts-engine)"}
+          BOX = "min_lat=40.88&max_lat=41.37&min_lng=-73.99&max_lng=-73.48"
+          def get(q):
+              url = "https://seeclickfix.com/api/v2/issues?" + q + "&per_page=100&status=open,acknowledged,closed,archived"
+              for attempt in range(4):
+                  try:
+                      with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60) as r:
+                          return json.load(r)
+                  except Exception as e:
+                      print("retry", attempt, e); time.sleep(20 * (attempt + 1))
+              return None
+          for y in (2024, 2025):
+              d = get(f"{BOX}&after={y}-01-01T00:00:00-05:00&before={y+1}-01-01T00:00:00-05:00")
+              if not d:
+                  print(f"::warning::{y}: blocked"); continue
+              total = d["metadata"]["pagination"]["entries"]
+              print(f"::warning::Westchester box {y}: {total} reports")
+              orgs, places, closed = collections.Counter(), collections.Counter(), 0
+              pages = d["metadata"]["pagination"]["pages"]
+              seen = 0
+              for page in range(1, min(pages, 40) + 1):
+                  if page > 1:
+                      time.sleep(6)
+                      d = get(f"{BOX}&after={y}-01-01T00:00:00-05:00&before={y+1}-01-01T00:00:00-05:00&page={page}")
+                      if not d: break
+                  for i in d["issues"]:
+                      seen += 1
+                      orgs[((i.get("request_type") or {}).get("organization")) or "none"] += 1
+                      a = i.get("address") or ""
+                      parts = [p.strip() for p in a.replace(" United States", "").replace(", USA", "").split(",")]
+                      places[parts[-3] if len(parts) >= 3 else a[:30]] += 1
+                      closed += bool(i.get("closed_at"))
+              print(f"::warning::{y} read {seen}, closed {closed}; orgs {dict(orgs.most_common(15))}")
+              print(f"::warning::{y} places {dict(places.most_common(15))}")
+              time.sleep(10)
+          PY
       - name: Sample of 2025 reports in the box
         run: |
           curl -sS -A "receipts-engine (github.com/Edwin580/receipts-engine)" "https://seeclickfix.com/api/v2/issues?min_lat=40.88&max_lat=41.37&min_lng=-73.99&max_lng=-73.48&after=2025-01-01T00:00:00-05:00&per_page=100&status=open,acknowledged,closed,archived" | python3 -c "
