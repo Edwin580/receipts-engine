@@ -46,6 +46,7 @@ rows by influence ("these 5 complaints move the median the most").
 | integer `sum`, `mean` | exact 128-bit total minus the value | yes (same formula as the executor) |
 | `median` | from the sorted values: remove rank r, take the middle | yes |
 | `min`, `max` (integer, decimal, timestamp) | changes only when removing the extreme itself | yes |
+| `percentile` | from the sorted values: remove rank r, take rank ⌈p·(n−1)/100⌉ of the rest | yes (picks a value) |
 | decimal `sum`, `mean` | `total − x` | **no**, within n·ε·Σ\|x\| of a re-run |
 | `min`, `max` of text / true-false | not supported (error) | — |
 

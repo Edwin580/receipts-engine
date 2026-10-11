@@ -166,6 +166,28 @@ fn explains_invalid_plans() {
         "step 1: count counts rows and takes no column; use count_non_null"
     );
     assert_eq!(
+        err(scan().aggregate(
+            &[],
+            vec![Aggregate::new(
+                "p",
+                AggFunc::Percentile(90),
+                Some("borough")
+            )]
+        )),
+        "step 1: can't take the percentile of \"borough\", a text column"
+    );
+    assert_eq!(
+        err(scan().aggregate(
+            &[],
+            vec![Aggregate::new(
+                "p",
+                AggFunc::Percentile(100),
+                Some("unique_key")
+            )]
+        )),
+        "step 1: a percentile's p must be a whole number from 1 to 99, not 100"
+    );
+    assert_eq!(
         err(scan().aggregate(&["location"], vec![])),
         "step 1: can't group by the location column \"location\""
     );
@@ -219,6 +241,61 @@ fn json_round_trips_and_is_canonical() {
     let canonical = to_canonical_json(&json).unwrap();
     let reparsed: serde_json::Value = serde_json::from_str(&canonical).unwrap();
     assert_eq!(from_json(&reparsed).unwrap(), plan);
+}
+
+#[test]
+fn percentiles_keep_their_type_and_round_trip() {
+    let plan = Plan::scan(SNAP).aggregate(
+        &["borough"],
+        vec![
+            Aggregate::new("p90_closed", AggFunc::Percentile(90), Some("closed_date")),
+            Aggregate::new("p10_key", AggFunc::Percentile(10), Some("unique_key")),
+        ],
+    );
+    let json = to_json(&plan);
+    assert_eq!(
+        json["nodes"][1]["aggregates"][0],
+        serde_json::json!({ "name": "p90_closed", "fn": "percentile", "p": 90, "column": "closed_date" })
+    );
+    assert_eq!(from_json(&json).unwrap(), plan);
+    let v = validate(plan, &Nyc311).unwrap();
+    let out = v.schema(v.plan().output);
+    assert_eq!(out.field("p90_closed").unwrap().ty, ColumnType::Timestamp);
+    assert_eq!(out.field("p10_key").unwrap().ty, ColumnType::I64);
+    assert!(
+        describe(&v)[1].contains("the 90th percentile of closed_date"),
+        "{}",
+        describe(&v)[1]
+    );
+
+    for (p, msg) in [
+        (serde_json::json!(0), "0"),
+        (serde_json::json!(100), "100"),
+        (serde_json::json!(2.5), "2.5"),
+        (serde_json::json!("90"), "\"90\""),
+    ] {
+        let mut j = json.clone();
+        j["nodes"][1]["aggregates"][0]["p"] = p;
+        assert_eq!(
+            from_json(&j).unwrap_err().to_string(),
+            format!("step 1: a percentile's p must be a whole number from 1 to 99, not {msg}")
+        );
+    }
+    let mut j = json.clone();
+    j["nodes"][1]["aggregates"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("p");
+    assert_eq!(
+        from_json(&j).unwrap_err().to_string(),
+        "step 1: missing key \"p\""
+    );
+    let mut j = json;
+    j["nodes"][1]["aggregates"][1]["fn"] = serde_json::json!("median");
+    assert_eq!(
+        from_json(&j).unwrap_err().to_string(),
+        "step 1: unexpected key \"p\""
+    );
 }
 
 #[test]

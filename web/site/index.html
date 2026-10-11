@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Receipts</title>
-<meta name="description" content="Click a number computed from NYC 311 data and see the complaints it came from. A query engine with row-level provenance, written in Rust and running in your browser.">
+<title>How long does 311 take?</title>
+<meta name="description" content="How long New York City took to close 311 complaints like yours, where you live, with every complaint behind the number.">
 <meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="style.css">
 <link rel="preload" href="fonts/et-book-roman-line-figures.woff" as="font" type="font/woff" crossorigin>
 <script type="module" src="app.js"></script>
@@ -14,159 +15,78 @@
 <article>
 
 <header>
-  <h1>Receipts</h1>
-  <p class="subtitle">Every number below is computed in your browser from New York City 311 requests. Click one to see the requests it came from.</p>
+  <h1>How long does 311 take?</h1>
+  <p class="subtitle">See how long New York City took to close complaints like yours where you live, and read the actual complaints behind the number.</p>
+  <p class="intro">New Yorkers report problems like noise, no heat, broken streetlights or rats by calling 311. The city records when each complaint was filed and when it was closed, and publishes every record. This page turns those records into a plain answer. Pick a kind of complaint and a place below to see how long the city usually took there, how that compares with the rest of the city, and the complaints themselves, each linked to the city's own record. If you filed one, you can check where yours stands.</p>
 </header>
 
-<section id="try">
-  <p class="status" id="status" role="status">Loading the engine.</p>
+<section id="ask">
+  <p class="status" id="status" role="status">Loading.</p>
 
-  <form id="query" class="ask" aria-label="Query">
+  <form id="query" class="ask" aria-label="Your question">
     <p>
-      Show the
-      <select id="metric" aria-label="What to compute" disabled>
-        <option value="mean">mean hours to close</option>
-        <option value="median">median hours to close</option>
-        <option value="count">number</option>
-      </select>
-      of
       <select id="type" aria-label="Complaint type" disabled></select>
-      requests, by
-      <select id="group" aria-label="Group by" disabled>
-        <option value="borough">borough</option>
-        <option value="channel">how they were reported</option>
-        <option value="agency">agency</option>
-      </select>.
-    </p>
-    <p class="judgement" id="judgement-line">
-      <label><input type="checkbox" id="drop-backwards" checked disabled>
-      Leave out requests closed before they were opened</label>
-      <span id="backwards-note"></span>
+      complaints in
+      <select id="area" aria-label="Where" disabled></select>
+      <span id="zip-wrap" hidden><input id="zip" type="text" inputmode="numeric" pattern="\d{5}" maxlength="5" size="5" placeholder="10001" aria-label="ZIP code"></span>
     </p>
   </form>
 
-  <aside class="note">
-    The engine is Rust compiled to WebAssembly. Plans go in as JSON
-    (<a href="https://github.com/Edwin580/receipts-engine/blob/main/docs/engine/plan.md">format</a>);
-    this page builds them in <a href="https://github.com/Edwin580/receipts-engine/blob/main/web/site/lib.js">lib.js</a>.
-  </aside>
+  <div id="answer" aria-live="polite" hidden>
+    <p class="headline" id="headline"></p>
+    <p id="context"></p>
+    <p class="caption" id="caveats"></p>
+    <p class="caption"><button type="button" class="text" id="copy-link">Copy a link to this answer</button></p>
+  </div>
 
-  <table id="result" class="result" aria-live="polite">
-    <thead><tr><th scope="col" id="group-head">borough</th><th scope="col" class="num">requests</th><th scope="col" class="num" id="value-head">mean hours</th><th scope="col" class="bar" aria-hidden="true"></th></tr></thead>
+  <form id="lookup" class="lookup" hidden>
+    <label for="key">Filed one yourself? Enter its complaint number:</label>
+    <input id="key" type="text" inputmode="numeric" autocomplete="off" placeholder="65671892" aria-describedby="yours">
+    <button type="submit">Check it</button>
+  </form>
+  <div id="yours" class="yours" aria-live="polite" hidden></div>
+</section>
+
+<section id="compare-section" hidden>
+  <h2 id="compare-head">Compared with nearby districts</h2>
+  <p class="caption" id="compare-caption"></p>
+  <table id="compare" class="result">
+    <thead><tr><th scope="col" id="compare-group">district</th><th scope="col" class="num">closed</th><th scope="col" class="num">half closed within</th><th scope="col" class="num tailcol">9 in 10 within</th><th scope="col" class="bar" aria-hidden="true"></th></tr></thead>
     <tbody></tbody>
   </table>
-  <p class="caption" id="run-caption"></p>
 </section>
 
-<section id="receipts" hidden>
-  <h2>Where it came from</h2>
-  <p id="selected-line"></p>
-
-  <aside class="note">
-    Each step keeps the mapping from its output rows to its input rows, so
-    a trace composes them instead of re-running anything.
-    <a href="https://github.com/Edwin580/receipts-engine/blob/main/crates/receipts-lineage/src/lib.rs">receipts-lineage</a>,
-    <a href="https://github.com/Edwin580/receipts-engine/blob/main/docs/engine/lineage.md">notes</a>.
-  </aside>
-
-  <p>The plan behind the table, one step per line. The sentences are generated from the plan by the engine, not written by me, so they can't drift from what it does.</p>
-  <ol class="pipeline" id="pipeline"></ol>
-  <details class="plan-json">
-    <summary>The plan as JSON</summary>
-    <pre id="plan-json"></pre>
-  </details>
-
-  <h3 id="receipts-head">The requests</h3>
-  <p class="caption" id="receipts-caption"></p>
-  <ul class="receipts" id="receipt-list"></ul>
+<section id="list-section" hidden>
+  <h2>The complaints</h2>
+  <p class="ask small">
+    Showing the ones that
+    <select id="order" aria-label="Order">
+      <option value="slowest">took longest</option>
+      <option value="fastest">closed fastest</option>
+      <option value="recent">were filed most recently</option>
+    </select>.
+    Each number links to the city's own record.
+  </p>
+  <ul class="receipts" id="list"></ul>
   <p><button type="button" class="text" id="more" hidden>Show 10 more</button></p>
+  <p class="caption" id="sway"></p>
 </section>
 
-<section id="whatif" hidden>
-  <h2>What if some of them are wrong?</h2>
-
-  <aside class="note">
-    Leave-one-out values and exclusions:
-    <a href="https://github.com/Edwin580/receipts-engine/blob/main/crates/receipts-cf/src/lib.rs">receipts-cf</a>,
-    <a href="https://github.com/Edwin580/receipts-engine/blob/main/docs/engine/counterfactuals.md">notes</a>.
-  </aside>
-
-  <p>A trace says which rows went into a number. It doesn't say which of them matter. For the selected number, the engine works out what it would be without each request, all at once, and ranks the requests by how far they move it.</p>
-
-  <div id="whatif-body">
-    <p class="ask">
-      <label for="k">Leave out the</label>
-      <input type="range" id="k" min="0" max="20" value="0" step="1">
-      <output id="k-out" for="k">0</output>
-      requests that move it most.
-    </p>
-    <p class="effect" id="effect" aria-live="polite"></p>
-    <ol class="movers" id="movers"></ol>
-  </div>
-  <p id="whatif-count" hidden>For a count, every request moves the number by exactly one, so there is nothing to rank. Switch to the mean or the median above.</p>
+<section id="how-section" hidden>
+  <details id="how">
+    <summary>How this was counted</summary>
+    <p>Each step below was run on the city's data in your browser, in this order. The sentences are generated from the query itself.</p>
+    <ol class="pipeline" id="pipeline"></ol>
+  </details>
 </section>
 
-<section id="verify" hidden>
-  <h2>The data checks itself</h2>
-
-  <aside class="note">
-    Verification: <a href="https://github.com/Edwin580/receipts-engine/blob/main/crates/receipts-wasm/src/verify.rs">verify.rs</a>.
-    The Arrow reader has no dependencies, so the browser build doesn't trust the
-    writer's code: <a href="https://github.com/Edwin580/receipts-engine/blob/main/crates/receipts-core/src/ipc.rs">ipc.rs</a>.
-    Decision record: <a href="https://github.com/Edwin580/receipts-engine/blob/main/docs/adr/0011-verify-on-load.md">ADR 0011</a>.
-  </aside>
-
-  <p>A receipt is only worth something if the data it points to is the data that was published. So the engine doesn't take the snapshot's word for it. Before it will run anything, it decodes the files and re-derives every hash from the bytes: each block of 65,536 rows, each column, the text dictionaries, the side tables and the manifest. It also checks the sort order that row numbers depend on.</p>
-  <p id="verify-timings"></p>
-
-  <p class="ask">
-    <label for="offset">Flip one bit at byte</label>
-    <input type="number" id="offset" min="0" step="1" inputmode="numeric">
-    <span id="offset-of"></span>
-    <button type="button" class="text" id="random-offset">pick another</button>
-  </p>
-  <p class="buttons"><button type="button" id="tamper">Flip it and load again</button> <button type="button" id="tamper-many">Try 25 random bits</button></p>
-  <p class="effect" id="tamper-out" aria-live="polite"></p>
-  <ul class="receipts tally" id="tally"></ul>
-  <p>A flip that breaks the compressed data, or points a value past its dictionary, is caught while decoding, and the reader says where. Every read is bounds checked, so a broken file gives an error, never a crash. A flip that decodes cleanly changes a value, and the hash of that column's chunk no longer matches.</p>
-</section>
-
-<section id="notes">
-  <h2>How it works</h2>
-
-  <p>I built Receipts to answer one question about any number derived from public data: which rows is it made of, and what happens to it if some of them are wrong? It has four parts.</p>
-
-  <aside class="note"><a href="https://github.com/Edwin580/receipts-engine/tree/main/crates/receipts-snapshot">receipts-snapshot</a>, <a href="https://github.com/Edwin580/receipts-engine/blob/main/docs/snapshot/cleaning-rules.md">cleaning rules</a>, <a href="https://github.com/Edwin580/receipts-engine/blob/main/docs/adr/0004-snapshots-coerce-plans-judge.md">ADR 0004</a>.</aside>
-  <p><b>Snapshots.</b> A command line tool pages through the city's Socrata API, keeps the raw responses, and builds a typed, sorted, compressed Arrow file. Every chunk, column and file is hashed with BLAKE3, and the hashes roll up into one snapshot hash. Cleaning only changes how a value is stored. It never decides a value is wrong. Judgements like "a request can't close before it opens" belong in the plan, where you can see them and turn them off, as the checkbox above does.</p>
-
-  <aside class="note"><a href="https://github.com/Edwin580/receipts-engine/tree/main/crates/receipts-plan">receipts-plan</a>, <a href="https://github.com/Edwin580/receipts-engine/blob/main/crates/receipts-plan/src/describe.rs">describe.rs</a>.</aside>
-  <p><b>Plans.</b> A plan is a list of steps: scan, filter, map, aggregate, sort, limit. The engine checks names and types before running, explains any error in a sentence, and hashes each step together with its inputs, so two plans that share a prefix share hashes.</p>
-
-  <aside class="note"><a href="https://github.com/Edwin580/receipts-engine/tree/main/crates/receipts-exec">receipts-exec</a>, <a href="https://github.com/Edwin580/receipts-engine/blob/main/crates/receipts-exec/tests/differential.rs">differential test</a>.</aside>
-  <p><b>Lineage.</b> The operators already know which input rows produce each output row. A filter knows which rows it kept, an aggregate knows its groups. I keep those mappings instead of throwing them away. That costs four bytes per row for each filter, sort or aggregate and nothing for scans and maps, and a trace becomes a few array lookups. A property test runs random plans on random tables against a slow reference interpreter that carries a set of source rows through every operator, and the two must agree exactly.</p>
-
-  <aside class="note"><a href="https://github.com/Edwin580/receipts-engine/blob/main/crates/receipts-cf/tests/cf.rs">cf.rs</a> checks both paths against each other on random plans.</aside>
-  <p><b>Counterfactuals.</b> This was the hardest part to get exactly right. The fast way to remove a row from a mean is to subtract it from the sum. With floating point, that answer can differ in the last bits from a fresh run, because addition order matters. So the engine recomputes only the groups that lost a row, from their remaining rows in the original order, with the same aggregate code the executor uses. When that shortcut isn't valid, for example when a limit runs before the aggregate and removing a row pulls another one in, it re-runs the plan. Both paths give the same bits as a full re-run, and a property test checks that.</p>
-
-  <h3>About this demo</h3>
-  <p><span id="scope"></span> The page loads one month of real data so it stays quick on a phone. The full project is built for two years of requests, about 7.1 million rows (<a href="https://github.com/Edwin580/receipts-engine/blob/main/docs/benchmarks/m4.md">benchmarks</a>). This page uses the single threaded build, because GitHub Pages can't send the headers that browser threads need.</p>
-
-  <h3>Prior work</h3>
-  <p>Tracing a derived value back to its source rows is an old database problem. Cui, Widom and Wiener worked it out for relational views in
-  <a href="https://doi.org/10.1145/357775.357777">Tracing the lineage of view data in a warehousing environment</a> (ACM TODS, 2000).
-  Asking what a result becomes when source rows are removed is deletion propagation, studied by Buneman, Khanna and Tan in
-  <a href="https://doi.org/10.1145/543613.543633">On propagation of deletions and annotations through views</a> (PODS 2002).
-  Snapshots use the <a href="https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format">Arrow IPC file format</a> and
-  <a href="https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf">BLAKE3</a> hashing.</p>
-
-  <p class="foot">
-    <a href="https://github.com/Edwin580/receipts-engine">Source on GitHub</a>.
-    Data from <a href="https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2010-to-Present/erm2-nwe9">NYC Open Data</a>, under the city's <a href="https://opendata.cityofnewyork.us/overview/#termsofuse">terms of use</a>.
-    Set in ET Book; layout after <a href="https://edwardtufte.github.io/tufte-css/">Tufte CSS</a>.
-  </p>
-</section>
+<footer class="foot">
+  <p id="source-line">Data from <a href="https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2010-to-Present/erm2-nwe9">NYC Open Data</a>, under the city's <a href="https://opendata.cityofnewyork.us/overview/#termsofuse">terms of use</a>.</p>
+  <p id="data-line"></p>
+  <p><a href="methods.html">Methods and limits</a> · <a href="https://github.com/Edwin580/receipts-engine">Source code</a></p>
+</footer>
 
 </article>
-<noscript><p class="status">This page runs a query engine in your browser, so it needs JavaScript.</p></noscript>
+<noscript><p class="status">This page computes everything in your browser, so it needs JavaScript.</p></noscript>
 </body>
 </html>

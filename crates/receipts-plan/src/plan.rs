@@ -102,9 +102,15 @@ pub enum AggFunc {
     Median,
     Min,
     Max,
+    /// The nearest-rank percentile: the smallest value that at least `p`
+    /// percent of the values are at or below (1 <= p <= 99). It is always
+    /// one of the values, so it has the column's type.
+    Percentile(u8),
 }
 
 impl AggFunc {
+    /// Every function without a parameter; `Percentile` is spelled with
+    /// its own `p`.
     pub const ALL: [Self; 7] = [
         Self::Count,
         Self::CountNonNull,
@@ -124,6 +130,7 @@ impl AggFunc {
             Self::Median => "median",
             Self::Min => "min",
             Self::Max => "max",
+            Self::Percentile(_) => "percentile",
         }
     }
 
@@ -141,6 +148,7 @@ impl AggFunc {
                 Self::Min | Self::Max,
                 Some(t @ (C::I64 | C::F64 | C::Timestamp | C::DictUtf8 | C::Bool)),
             ) => Some(t),
+            (Self::Percentile(_), Some(t @ (C::I64 | C::F64 | C::Timestamp))) => Some(t),
             _ => None,
         }
     }
@@ -449,6 +457,13 @@ fn node_schema(
             for a in aggregates {
                 if a.name.is_empty() {
                     return Err("every aggregate needs a name".into());
+                }
+                if let AggFunc::Percentile(p) = a.func
+                    && !(1..=99).contains(&p)
+                {
+                    return Err(format!(
+                        "a percentile's p must be a whole number from 1 to 99, not {p}"
+                    ));
                 }
                 let input_ty = match &a.column {
                     Some(c) => Some(field_of(c)?.ty),

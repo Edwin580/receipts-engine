@@ -279,6 +279,11 @@ pub(crate) fn materialize(d: Datum, n: usize, name: &str) -> Column {
     crate::table::renamed(col, name)
 }
 
+/// Value `i` of a true/false datum, `None` if missing.
+pub(crate) fn bool_at(d: &Datum, i: usize) -> Option<bool> {
+    get_bool(d)(i)
+}
+
 /// Rows where the predicate is true (missing counts as not true).
 pub(crate) fn selection(d: &Datum, n: usize) -> Vec<u32> {
     let g = get_bool(d);
@@ -431,7 +436,7 @@ fn cmp_num(a: Num, b: Num) -> Ordering {
 
 /// Decimal columns hold no NaN (see `arith`), so this is a total order in
 /// which `-0.0 == 0.0`.
-pub(crate) fn cmp_f64(x: f64, y: f64) -> Ordering {
+pub fn cmp_f64(x: f64, y: f64) -> Ordering {
     x.partial_cmp(&y).unwrap_or_else(|| x.total_cmp(&y))
 }
 
