@@ -8,6 +8,7 @@ pub mod known_issues;
 pub mod manifest;
 pub mod raw;
 pub mod rules;
+pub mod seeclickfix;
 pub mod socrata;
 pub mod spec;
 pub mod synth;

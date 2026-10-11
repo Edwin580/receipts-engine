@@ -73,7 +73,18 @@ impl UreqTransport {
 
 impl Transport for UreqTransport {
     fn get(&mut self, url: &str) -> Result<Vec<u8>, TransportError> {
-        let mut req = self.agent.get(url).header("Accept", "application/json");
+        let mut req = self
+            .agent
+            .get(url)
+            .header("Accept", "application/json")
+            .header(
+                "User-Agent",
+                concat!(
+                    "receipts-snapshot/",
+                    env!("CARGO_PKG_VERSION"),
+                    " (+https://github.com/Edwin580/receipts-engine)"
+                ),
+            );
         if let Some(token) = &self.app_token {
             req = req.header("X-App-Token", token);
         }

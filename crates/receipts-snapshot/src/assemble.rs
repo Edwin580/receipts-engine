@@ -210,7 +210,7 @@ pub fn build_with(
             cleaning_log_hash: log_hash.to_hex(),
             rejects_hash: rejects_hash.to_hex(),
         },
-        known_issues: known_issues(&cleaned.columns, meta.rows_updated_at),
+        known_issues: known_issues(&cleaned.columns, meta.rows_updated_at, &spec.area),
         files,
     };
     m.manifest_hash = manifest::manifest_hash(&serde_json::to_value(&m)?)?;
