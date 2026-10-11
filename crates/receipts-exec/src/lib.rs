@@ -10,7 +10,8 @@ mod eval;
 mod ops;
 mod table;
 
-pub use ops::median_of_sorted;
+pub use eval::cmp_f64;
+pub use ops::{median_of_sorted, percentile_rank};
 pub use table::Table;
 
 use eval::{Evaluator, materialize, selection};

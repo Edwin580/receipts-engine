@@ -39,10 +39,17 @@ deterministic. Output columns are the group columns, then the aggregates.
 | `mean` | integer / decimal | decimal | missing |
 | `median` | integer / decimal | decimal: the middle value, or the mean of the two middle values | missing |
 | `min`, `max` | integer, decimal, timestamp, text, bool | same type | missing |
+| `percentile` (with `"p"`: 1–99) | integer, decimal, timestamp | same type: the smallest value that at least p% of the values are at or below | missing |
 
 All functions except `count` skip missing values. Decimal sums add values
 in row order. Integer sums and means accumulate exactly in 128 bits.
 Medians convert integers to decimals first, which is exact below 2^53.
+A percentile is nearest-rank: for n values sorted ascending it is the value
+at position ⌈p·n/100⌉ (counting from 1). It is always one of the values, so
+`{"name": "p90_hours", "fn": "percentile", "p": 90, "column": "hours_to_close"}`
+reads "90% of complaints closed within this many hours", and no arithmetic
+is involved. `percentile` with p = 50 can differ from `median` when n is
+even, because the median averages the two middle values.
 
 ## 2. Expressions and missing values
 
