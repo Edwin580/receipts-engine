@@ -1,0 +1,35 @@
+name: scf-probe
+on:
+  push:
+    branches: [tmp-scf-probe]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Count SeeClickFix reports in Westchester
+        run: |
+          set -u
+          count() {
+            body=$(curl -sS -A "receipts-engine (github.com/Edwin580/receipts-engine)" "https://seeclickfix.com/api/v2/issues?$1&per_page=1&status=open,acknowledged,closed,archived")
+            n=$(echo "$body" | python3 -c "import json,sys; print(json.load(sys.stdin)['metadata']['pagination']['entries'])" 2>/dev/null || echo "error: $(echo "$body" | head -c 80)")
+            echo "::warning::$2: $n"
+            sleep 2
+          }
+          BOX="min_lat=40.88&max_lat=41.37&min_lng=-73.99&max_lng=-73.48"
+          count "$BOX" "Westchester box, all time"
+          for y in 2023 2024 2025 2026; do count "$BOX&after=$y-01-01T00:00:00-05:00&before=$((y+1))-01-01T00:00:00-05:00" "Westchester box, $y"; done
+          count "min_lat=40.90&max_lat=40.99&min_lng=-73.91&max_lng=-73.83&after=2025-01-01T00:00:00-05:00" "Yonkers box, since 2025"
+          for p in yonkers new-rochelle white-plains mount-vernon peekskill ossining greenburgh scarsdale rye mamaroneck port-chester westchester-county; do count "place_url=$p" "place $p"; done
+      - name: Sample of 2025 reports in the box
+        run: |
+          curl -sS -A "receipts-engine (github.com/Edwin580/receipts-engine)" "https://seeclickfix.com/api/v2/issues?min_lat=40.88&max_lat=41.37&min_lng=-73.99&max_lng=-73.48&after=2025-01-01T00:00:00-05:00&per_page=100&status=open,acknowledged,closed,archived" | python3 -c "
+          import json,sys,collections
+          d=json.load(sys.stdin); iss=d['issues']
+          print('::warning::sample keys:', ','.join(sorted(iss[0].keys())) if iss else 'none')
+          c=collections.Counter(((i.get('request_type') or {}).get('organization') or 'none') for i in iss)
+          print('::warning::orgs:', dict(c.most_common(12)))
+          t=collections.Counter(((i.get('request_type') or {}).get('title') or i.get('summary')) for i in iss)
+          print('::warning::types:', dict(t.most_common(12)))
+          closed=sum(1 for i in iss if i.get('closed_at'))
+          print('::warning::closed', closed, 'of', len(iss), '| addresses:', [i.get('address') for i in iss[:5]])
+          "
