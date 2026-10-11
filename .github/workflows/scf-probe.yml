@@ -6,14 +6,15 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: One sample per organization
+      - name: Address towns per organization, 2024-2025
         run: |
           python3 - <<'PY'
-          import json, time, urllib.request
+          import json, time, urllib.request, collections, re
           UA = {"User-Agent": "receipts-engine (github.com/Edwin580/receipts-engine)"}
-          url = "https://seeclickfix.com/api/v2/issues?min_lat=40.88&max_lat=41.37&min_lng=-73.99&max_lng=-73.48&after=2025-01-01T00:00:00-05:00&before=2026-01-01T00:00:00-05:00&per_page=100&status=open,acknowledged,closed,archived&page={}"
-          seen = {}
-          for page in range(1, 17):
+          url = "https://seeclickfix.com/api/v2/issues?min_lat=40.88&max_lat=41.37&min_lng=-73.99&max_lng=-73.48&after=2024-01-01T00:00:00-05:00&before=2026-01-01T00:00:00-05:00&per_page=100&status=open,acknowledged,closed,archived&page={}"
+          towns = collections.defaultdict(collections.Counter)
+          n = 0
+          for page in range(1, 60):
               for attempt in range(4):
                   try:
                       with urllib.request.urlopen(urllib.request.Request(url.format(page), headers=UA), timeout=60) as r:
@@ -21,16 +22,17 @@ jobs:
                   except Exception as e:
                       print("retry", e); time.sleep(20 * (attempt + 1))
               else:
-                  break
+                  print("::warning::gave up at page", page); break
               for i in d["issues"]:
-                  rt = i.get("request_type") or {}
-                  org = rt.get("organization") or "none"
-                  if org not in seen:
-                      seen[org] = {k: i.get(k) for k in ("id", "status", "summary", "created_at", "acknowledged_at", "closed_at", "reopened_at", "address", "lat", "lng", "html_url")}
-                      seen[org]["request_type"] = rt
+                  n += 1
+                  org = (i.get("request_type") or {}).get("organization") or "none"
+                  a = (i.get("address") or "").replace(", USA", "").replace(" United States", "")
+                  m = re.search(r"([A-Za-z .'-]+?),? (?:NY|New York|CT|Connecticut)\b", a)
+                  towns[org][m.group(1).strip().split("  ")[-1] if m else "?"] += 1
               if not d["metadata"]["pagination"]["next_page"]:
                   break
               time.sleep(6)
-          for org, s in seen.items():
-              print("::warning::" + json.dumps({"org": org, **s})[:3500])
+          print(f"::warning::read {n}")
+          for org, c in sorted(towns.items(), key=lambda kv: -sum(kv[1].values())):
+              print(f"::warning::{org} ({sum(c.values())}): " + json.dumps(dict(c.most_common(8)))[:900])
           PY
