@@ -182,3 +182,116 @@ fn runs_traces_and_excludes() {
     assert!(e.drop_execution(id));
     assert!(e.exclude(a_id, &[0]).unwrap_err().contains("dropped"));
 }
+
+/// The source rows of output row 0 of a plan, run fresh.
+fn rows_where(e: &mut Engine, hash: &str, predicate: Value) -> Vec<u32> {
+    let plan = json!({
+        "format": "receipts-plan/1",
+        "nodes": [
+            {"op": "scan", "snapshot": hash},
+            {"op": "filter", "input": 0, "predicate": predicate},
+            {"op": "aggregate", "input": 1, "group_by": [], "aggregates": [{"name": "n", "fn": "count"}]}
+        ],
+        "output": 2
+    });
+    let r = e.run(&plan.to_string());
+    let id = r["execution"].as_u64().unwrap() as u32;
+    let (_, rows) = e.trace_back(id, 0).unwrap();
+    e.drop_execution(id);
+    rows
+}
+
+#[test]
+fn forward_traces_say_where_and_why_a_row_stops() {
+    let (mut e, hash) = loaded();
+    let r = e.run(&noise_plan(&hash));
+    let id = r["execution"].as_u64().unwrap() as u32;
+    let groups = r["output"]["rows"].as_array().unwrap().len();
+
+    // Every row behind an output row reaches exactly that row.
+    for g in 0..groups as u32 {
+        let (_, rows) = e.trace_back(id, g).unwrap();
+        for &s in rows.iter().take(20) {
+            let f = e.trace_forward(id, s).unwrap();
+            assert_eq!(f["reaches_output"], true, "{f}");
+            assert_eq!(f["output_row"], g);
+            assert_eq!(f["path"].as_array().unwrap().len(), 5);
+        }
+    }
+
+    let eq =
+        |c: &str, v: &str| json!({"call": "eq", "args": [{"column": c}, {"literal": {"str": v}}]});
+    let missing = |c: &str| json!({"call": "is_null", "args": [{"column": c}]});
+
+    // Another type: the filter is false for it.
+    let other = rows_where(
+        &mut e,
+        &hash,
+        json!({"call": "not", "args": [eq("complaint_type", "Noise - Residential")]}),
+    );
+    let f = e.trace_forward(id, other[0]).unwrap();
+    assert_eq!(f["reaches_output"], false);
+    assert_eq!(f["output_row"], Value::Null);
+    assert_eq!(f["dropped"]["step"], 1);
+    assert_eq!(
+        f["dropped"]["reason"],
+        json!({"kind": "filter", "value": false})
+    );
+    assert_eq!(f["path"].as_array().unwrap().len(), 1);
+
+    // The right type but still open: `closed >= created` can't be decided.
+    let open = rows_where(
+        &mut e,
+        &hash,
+        json!({"call": "and", "args": [eq("complaint_type", "Noise - Residential"), missing("closed_date")]}),
+    );
+    assert!(
+        !open.is_empty(),
+        "the synthetic data has open noise complaints"
+    );
+    let f = e.trace_forward(id, open[0]).unwrap();
+    assert_eq!(
+        f["dropped"]["reason"],
+        json!({"kind": "filter", "value": null})
+    );
+    assert!(
+        f["dropped"]["sentence"]
+            .as_str()
+            .unwrap()
+            .contains("can't be decided")
+    );
+
+    // A limit: only the first output row survives.
+    let limited = noise_plan(&hash).replace(r#""output":4"#, r#""output":5"#);
+    let mut v: Value = serde_json::from_str(&limited).unwrap();
+    v["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"op": "limit", "input": 4, "count": "1"}));
+    let l = e.run(&v.to_string());
+    let lid = l["execution"].as_u64().unwrap() as u32;
+    let (_, second) = e.trace_back(id, 1).unwrap();
+    let f = e.trace_forward(lid, second[0]).unwrap();
+    assert_eq!(f["dropped"]["step"], 5);
+    assert_eq!(
+        f["dropped"]["reason"],
+        json!({"kind": "limit", "position": 1, "count": "1"})
+    );
+
+    // Exclusions: a row left out stops at the scan.
+    let x = e.exclude(id, &second[..1]).unwrap();
+    let xid = x["execution"].as_u64().unwrap() as u32;
+    let f = e.trace_forward(xid, second[0]).unwrap();
+    assert_eq!(f["dropped"]["step"], 0);
+    assert_eq!(f["dropped"]["reason"]["kind"], "excluded");
+    assert_eq!(
+        e.trace_forward(xid, second[1]).unwrap()["reaches_output"],
+        true
+    );
+
+    assert!(
+        e.trace_forward(id, 10_000_000)
+            .unwrap_err()
+            .contains("past the snapshot")
+    );
+}

@@ -97,6 +97,16 @@ impl JsEngine {
     }
 
     /// Full source records for snapshot rows.
+    /// Where one snapshot row goes in an execution, and why it stops if it
+    /// doesn't reach the output.
+    #[wasm_bindgen(js_name = traceForward)]
+    pub fn trace_forward(&self, execution: u32, source_row: u32) -> Result<String, JsError> {
+        self.inner
+            .trace_forward(execution, source_row)
+            .map(|v| v.to_string())
+            .map_err(js_err)
+    }
+
     #[wasm_bindgen(js_name = sourceRecords)]
     pub fn source_records(&self, snapshot: &str, rows: &[u32]) -> Result<String, JsError> {
         self.inner
