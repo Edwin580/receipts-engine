@@ -67,6 +67,11 @@ $B build  --raw raw/nyc311 --out snapshots/nyc311
 $B verify snapshots/nyc311/<hash16>
 
 $B synth  --out raw/synth --rows 1000000      # synthetic 311-like data, no network needed
+
+# Westchester towns that take requests through SeeClickFix (Mount Pleasant,
+# Greenburgh, Mount Vernon, North Castle, Peekskill):
+$B fetch --source westchester --out raw/wch --from 2025-01-01 --to 2026-01-01
+$B build --source westchester --raw raw/wch --out snapshots/wch
 python3 tools/oracle/snapshot_oracle.py raw/synth snapshots/synth/<hash16>   # needs pyarrow
 ```
 
