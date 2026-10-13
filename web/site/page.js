@@ -84,7 +84,9 @@ export async function loadSnapshot(dir, what) {
 }
 
 // A select is as wide as its longest option; size each to its chosen one
-// so the sentence reads without gaps.
+// so the sentence reads without gaps. The browser draws its own arrow on
+// top of that, so leave room for it.
+const ARROW = 28;
 export function fitSelects() {
   const probe = el("span", { style: "position:absolute;visibility:hidden;white-space:pre" });
   document.body.append(probe);
@@ -95,7 +97,7 @@ export function fitSelects() {
     for (const k of ["fontFamily", "fontSize", "fontStyle", "fontWeight", "letterSpacing"]) probe.style[k] = cs[k];
     probe.textContent = s.selectedOptions[0]?.textContent ?? "";
     const pad = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
-    s.style.width = `${Math.ceil(probe.getBoundingClientRect().width + pad) + 4}px`;
+    s.style.width = `${Math.ceil(probe.getBoundingClientRect().width + pad) + ARROW}px`;
   }
   probe.remove();
 }
