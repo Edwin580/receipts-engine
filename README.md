@@ -38,7 +38,7 @@ node --test web/site/test/*.test.mjs   # page logic and the real snapshot
 
 The site is static files: `web/site/index.html` and `methods.html`,
 `app.js` (talks to the engine), `lib.js` (builds queries from the form; no
-DOM), `style.css`, the ET Book fonts, and the snapshot in `web/site/data/`. It has no
+DOM), `style.css`, and the snapshot in `web/site/data/`. It has no
 JavaScript dependencies and no bundler. `.github/workflows/pages.yml`
 builds the WASM package and publishes `web/site` on every push to `main`.
 
