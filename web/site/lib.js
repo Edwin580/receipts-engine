@@ -304,7 +304,7 @@ export function hoursBetween(created, closed) {
   return (t(closed) - t(created)) / 3_600_000;
 }
 
-/** "2025-07-04T22:14:05.000000" -> "Jul 4, 10:14 pm". */
+/** "2025-07-04T22:14:05.000000" -> "Jul 4, 2025 10:14 pm". */
 export function fmtWhen(ts) {
   if (!ts) return "";
   const [y, mo, d] = ts.slice(0, 10).split("-").map(Number);

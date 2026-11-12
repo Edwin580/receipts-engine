@@ -78,6 +78,8 @@ async function load() {
     $("zip-wrap").hidden = true;
     setArea(parseAreaKey(areaSel.value));
   });
+  // Enter in the ZIP box would submit the form and reload the page, losing the answer.
+  $("query").addEventListener("submit", (ev) => ev.preventDefault());
   $("zip").addEventListener("input", () => {
     const v = $("zip").value.trim();
     if (/^\d{5}$/.test(v)) { forgetComplaint(); setArea({ kind: "zip", value: v }); }
@@ -99,12 +101,10 @@ async function load() {
       && rows(countsPlan(state.snapshot, { type: want.type, area: { kind: "city" } }))[0][0] === 0) {
     want.type = null;
   }
-  if (want.type) {
-    const known = (a) => a.kind === "zip" || [...areaSel.options].some((o) => o.value === areaKey(a));
-    setQuestion({ type: want.type, area: known(want.area) ? want.area : { kind: "city" } });
-  } else {
-    answer();
-  }
+  // An area the menu doesn't have is the whole city; a link with only an
+  // area keeps the type already chosen.
+  const known = (a) => a.kind === "zip" || [...areaSel.options].some((o) => o.value === areaKey(a));
+  setQuestion({ type: want.type ?? state.q.type, area: known(want.area) ? want.area : { kind: "city" } });
   if (want.complaint) {
     $("key").value = want.complaint;
     lookUp(want.complaint);
